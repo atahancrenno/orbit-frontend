@@ -341,13 +341,39 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       }
     };
 
+    // 🟢 GÜNCELLENDİ: AKILLI REDDETME VE KAPATMA DİNLEYİCİSİ 🟢
     SocketService().onCallRejected = (targetId) {
       if (context.mounted) { 
+        bool wasLive = _activeLiveContacts.contains(targetId);
+        
         setState(() {
           isWaitingForLiveApproval = false;
-          _activeLiveContacts.remove(targetId);
+          _activeLiveContacts.remove(targetId); 
+          _liveTimers[targetId]?.cancel();
+          _liveTimers.remove(targetId);
+          if (_activeLiveContacts.isEmpty) {
+            _liveDurationTimer?.cancel();
+            _liveDuration = 0;
+          }
         });
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$targetId çağrıyı reddetti."), backgroundColor: Colors.red.shade800));
+        
+        if (wasLive) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.phone_disabled, color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Text("$targetId canlı bağlantıyı sonlandırdı."),
+              ],
+            ),
+            backgroundColor: Colors.orange.shade800,
+          ));
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text("$targetId çağrıyı reddetti."), 
+            backgroundColor: Colors.red.shade800
+          ));
+        }
       }
     };
 
@@ -456,6 +482,44 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     _incomingAmplitudeTimer?.cancel(); 
     _historyPlayer.dispose();
     super.dispose();
+  }
+
+  // 🟢 CANLI BAĞLANTIYI MANUEL SONLANDIRMA FONKSİYONU 🟢
+  void _endLiveConnection() {
+    if (activeIndex != -1) {
+      String contactName = allContacts[activeIndex]['name'];
+      if (_activeLiveContacts.contains(contactName)) {
+        
+        SocketService().rejectCall(contactName); 
+
+        setState(() {
+          _activeLiveContacts.remove(contactName);
+          _liveTimers[contactName]?.cancel();
+          _liveTimers.remove(contactName);
+          if (_activeLiveContacts.isEmpty) {
+            _liveDurationTimer?.cancel();
+            _liveDuration = 0;
+          }
+        });
+        if (hapticEnabled) HapticFeedback.heavyImpact();
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.phone_disabled, color: Colors.white, size: 18),
+                  const SizedBox(width: 8),
+                  Text("$contactName ile bağlantı kesildi."),
+                ],
+              ),
+              backgroundColor: Colors.red.shade800,
+              duration: const Duration(seconds: 2),
+            )
+          );
+        }
+      }
+    }
   }
 
   void _resetLiveTimeoutForContact(String contactName) {
@@ -614,11 +678,14 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   void _updateRecordingDrag(LongPressMoveUpdateDetails details) {
     if (!isRecording) return;
     setState(() {
+      // 🟢 MİKROFON ZIPLAMA HATASI DÜZELTİLDİ 🟢
+      double moveDelta = details.localOffsetFromOrigin.dx;
+      
       if (_isLeftHanded) {
-        _dragOffset = details.localPosition.dx.clamp(0.0, 150.0); 
+        _dragOffset = moveDelta.clamp(0.0, 150.0); 
         _isCancelled = _dragOffset > 100;
       } else {
-        _dragOffset = details.localPosition.dx.clamp(-150.0, 0.0); 
+        _dragOffset = moveDelta.clamp(-150.0, 0.0); 
         _isCancelled = _dragOffset < -100;
       }
     });
@@ -1111,10 +1178,49 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                           onContactAddTap: _openContacts,
                         ),
 
+                        // 🟢 CANLI BAĞLANTIYI MANUEL KAPATMA BUTONU 🟢
                         AnimatedPositioned(
                           duration: const Duration(milliseconds: 300),
                           curve: Curves.easeOutCubic,
-                          left: _isLeftHanded ? menuX + 60 : menuX - 180, top: menuY - 140, 
+                          right: !_isLeftHanded ? 30.0 : null, 
+                          left: _isLeftHanded ? 30.0 : null, 
+                          top: menuY - 240, 
+                          child: AnimatedOpacity(
+                            duration: const Duration(milliseconds: 300),
+                            opacity: (showSearchField || activeIndex == -1 || !_activeLiveContacts.contains(activeContactName)) ? 0.0 : 1.0, 
+                            child: IgnorePointer(
+                              ignoring: showSearchField || activeIndex == -1 || !_activeLiveContacts.contains(activeContactName), 
+                              child: GestureDetector(
+                                onTap: _endLiveConnection, 
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.redAccent.withValues(alpha: 0.15), 
+                                    borderRadius: BorderRadius.circular(20), 
+                                    border: Border.all(color: Colors.redAccent.withValues(alpha: 0.6), width: 1.5),
+                                    boxShadow: [BoxShadow(color: Colors.redAccent.withValues(alpha: 0.3), blurRadius: 10)]
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: const [
+                                      Icon(Icons.phone_disabled, size: 16, color: Colors.redAccent),
+                                      SizedBox(width: 6),
+                                      Text("Bağlantıyı Kes", style: TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // 🟢 YANITLANIYOR KUTUCUĞU 🟢
+                        AnimatedPositioned(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                          left: !_isLeftHanded ? 30.0 : null, 
+                          right: _isLeftHanded ? 30.0 : null, 
+                          top: menuY - 240, 
                           child: AnimatedOpacity(
                             duration: const Duration(milliseconds: 300),
                             opacity: (showSearchField || activeIndex == -1 || _replyingToMessage == null) ? 0.0 : 1.0, 
@@ -1201,7 +1307,6 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                             ),
                           ),
 
-                        // 🟢 DÜZELTİLMİŞ: 5 SANİYE SONRA TAMAMEN KAYBOLAN HAYALET OK 🟢
                         if (!showSearchField)
                           Positioned(
                             left: !_isLeftHanded ? 20.0 : null, 
@@ -2087,7 +2192,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   }
 }
 
-// 🟢 İŞTE YENİ 5 SANİYELİK ZAMANLAYICILI "HAYALET OK (GHOST ARROW)" WIDGET'IMIZ 🟢
+// 🟢 HAYALET OK KONTROLÜ 🟢
 class GhostHandToggle extends StatefulWidget {
   final bool isLeftHanded;
   final VoidCallback onToggle;
@@ -2106,7 +2211,7 @@ class _GhostHandToggleState extends State<GhostHandToggle> {
   @override
   void initState() {
     super.initState();
-    _startFadeTimer(); // Widget ekrana çizilir çizilmez 5 saniyelik zamanlayıcı başlar
+    _startFadeTimer();
   }
 
   void _startFadeTimer() {
@@ -2114,7 +2219,7 @@ class _GhostHandToggleState extends State<GhostHandToggle> {
     _fadeTimer = Timer(const Duration(seconds: 5), () {
       if (mounted) {
         setState(() {
-          _isInitiallyVisible = false; // 5 saniye sonra hayalet moduna geç
+          _isInitiallyVisible = false;
         });
       }
     });
@@ -2129,11 +2234,10 @@ class _GhostHandToggleState extends State<GhostHandToggle> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      // Dokunma (Tap) ve Sürükleme (Pan) kontrolleri aktif
-      behavior: HitTestBehavior.opaque, // Görünmez (0.01 opacity) olsa bile dokunmaları yakalar!
+      behavior: HitTestBehavior.opaque,
       onPanDown: (_) {
         setState(() => _isInteracting = true);
-        _fadeTimer?.cancel(); // Dokunulduğu an zamanlayıcıyı durdur
+        _fadeTimer?.cancel(); 
       },
       onPanCancel: () {
         setState(() => _isInteracting = false);
@@ -2149,8 +2253,8 @@ class _GhostHandToggleState extends State<GhostHandToggle> {
       },
       onTapUp: (_) {
         setState(() => _isInteracting = false);
-        widget.onToggle(); // Tıklanınca el değiştirme fonksiyonunu tetikle
-        setState(() => _isInitiallyVisible = true); // Geçiş yapıldıktan sonra 5 saniyeliğine tekrar görünür olsun
+        widget.onToggle(); 
+        setState(() => _isInitiallyVisible = true); 
         _startFadeTimer();
       },
       onTapCancel: () {
@@ -2158,14 +2262,10 @@ class _GhostHandToggleState extends State<GhostHandToggle> {
         _startFadeTimer();
       },
       child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 500), // Yumuşak bir kayboluş animasyonu
-        // 🟢 İŞTE ZEKİ GÖRÜNÜRLÜK: 
-        // Eğer parmak üzerindeyse -> Parlak (0.6)
-        // Eğer ilk açılışsa ve 5 sn geçmediyse -> Silik Hayalet (0.10)
-        // Eğer 5 sn geçip kimse dokunmadıysa -> Tamamen Kaybolur (0.01) [0.0 yapmadık çünkü dokunma algılayıcısını bozabilir]
+        duration: const Duration(milliseconds: 500), 
         opacity: _isInteracting ? 0.6 : (_isInitiallyVisible ? 0.10 : 0.01), 
         child: Container(
-          width: 30, // 🟢 Genişlik 30 piksele düşürüldü
+          width: 30, 
           height: 300, 
           color: Colors.transparent, 
           child: CustomPaint(
@@ -2177,7 +2277,7 @@ class _GhostHandToggleState extends State<GhostHandToggle> {
   }
 }
 
-// 🟢 150 DERECELİK 30 PİKSEL GENİŞLİĞİNDE BEYAZ OK TASARIMCISI 🟢
+// 🟢 OK TASARIMCISI 🟢
 class _GhostArrowPainter extends CustomPainter {
   final bool isLeftHanded;
 
@@ -2187,13 +2287,12 @@ class _GhostArrowPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = Colors.white
-      ..strokeWidth = 2.0 // Göz yormaması ve daha zarif durması için inceltildi
+      ..strokeWidth = 2.0 
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
 
     final path = Path();
     
-    // Genişlik 30'a düştüğü için start ve apex noktaları da otomatik daralmış oldu
     double startX = isLeftHanded ? 0.0 : size.width;
     double apexX = isLeftHanded ? size.width : 0.0;
     double midY = size.height / 2;
@@ -2202,7 +2301,6 @@ class _GhostArrowPainter extends CustomPainter {
     path.lineTo(apexX, midY); 
     path.lineTo(startX, midY + 110);
 
-    // Hafif neon efekti
     canvas.drawPath(path, paint..maskFilter = const MaskFilter.blur(BlurStyle.solid, 3));
     canvas.drawPath(path, paint..maskFilter = null);
   }
