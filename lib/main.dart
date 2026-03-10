@@ -6,10 +6,14 @@ import 'package:audio_session/audio_session.dart';
 // Ekranlar ve Servisler
 import 'screens/orbit_main_screen.dart';
 import 'services/socket_service.dart';
+import 'services/notification_service.dart'; // 🟢 YENİ EKLENDİ: Bildirim Motoru
 
 void main() async {
   // 1. Flutter motorunu güvenle başlatır
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 🟢 YENİ: Bildirim motorunu uygulama açılır açılmaz ayağa kaldırıyoruz! 🟢
+  await NotificationService().init();
 
   // 🟢 2. EKRANI DİK (PORTRAIT) MODDA KİLİTLE! 🟢
   // Bu kod sayesinde telefon yan çevrilse bile uygulamamız asla dönmeyecek ve UI bozulmayacak.

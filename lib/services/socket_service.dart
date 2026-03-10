@@ -22,9 +22,12 @@ class SocketService {
   
   Function(String targetId)? onCallAccepted; 
   Function(String targetId)? onCallRejected; 
+  // 🟢 YENİ: Karşı taraf 30 saniye içinde açmazsa veya isteği geri çekerse tetiklenecekler 🟢
+  Function(String callerId)? onCallMissed;
+  Function(String targetId)? onCallTimeout;
 
   void initConnection() {
-    String serverUrl =  'http://192.168.1.17:3000';
+    String serverUrl =  'http://192.168.1.39:3000';
     
     socket = socket_io.io(serverUrl, <String, dynamic>{
       'transports': ['websocket'],
@@ -52,6 +55,17 @@ class SocketService {
       if (onCallRejected != null) onCallRejected!(data['targetId']);
     });
 
+    // 🟢 YENİ: Sunucudan çağrı zaman aşımına uğradı bilgisi gelirse
+    socket.on('call_timeout', (data) {
+      if (onCallTimeout != null) onCallTimeout!(data['targetId']);
+    });
+
+    // 🟢 YENİ: Arayan kişi çağrıyı iptal ederse
+    socket.on('missed_call', (data) {
+       debugPrint('⏰ Cevapsız Çağrı! ${data['callerId']}');
+       if (onCallMissed != null) onCallMissed!(data['callerId']);
+    });
+
     socket.on('audio_read', (data) {
       if (onAudioRead != null) onAudioRead!(data['messageId']);
     });
@@ -72,8 +86,6 @@ class SocketService {
         debugPrint('❌ Ses kaydetme hatası: $e');
       }
     });
-
-    socket.on('missed_call', (data) => debugPrint('⏰ Cevapsız Çağrı! ${data['callerId']}'));
   }
 
   void startCall(String targetUserId) {
@@ -86,6 +98,11 @@ class SocketService {
 
   void rejectCall(String callerId) {
     socket.emit('reject_call', { 'callerId': callerId, 'targetId': myUserId });
+  }
+
+  // 🟢 YENİ: 30 Saniye dolduğunda çağrıyı iptal etme fonksiyonu 🟢
+  void cancelCall(String targetUserId) {
+     socket.emit('cancel_call', { 'callerId': myUserId, 'targetId': targetUserId });
   }
 
   void sendAudio(String targetUserId, String audioBase64, String messageId) {
@@ -105,12 +122,10 @@ class SocketService {
   }
 
   Future<void> stopAudio() async {
-    // 🟢 STOP DEĞİL RELEASE! (Kanalın fişini tamamen çeker)
     await _audioPlayer.release(); 
   }
 
   Future<void> playLiveAudio(String filePath) async {
-    // 🟢 Çalmadan önce eski kanalı imha et, yenisini aç
     await _audioPlayer.release(); 
     await _audioPlayer.setVolume(1.0);
     await _audioPlayer.play(DeviceFileSource(filePath));

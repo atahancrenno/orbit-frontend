@@ -11,12 +11,17 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        // Desugaring (Modern saat kütüphanesi çevirici) açık kalıyor
+        isCoreLibraryDesugaringEnabled = true 
+        
+        // 🟢 DÜZELTME: Java 17 yerine standart Java 8'e (1.8) döndük
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
 
+    // 🟢 DÜZELTME: Hata veren jvmToolchain silindi, çalışan klasik yönteme dönüldü
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+        jvmTarget = "1.8"
     }
 
     defaultConfig {
@@ -41,4 +46,8 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
