@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "273325396141",
+    "project_id": "orbit-talk-73aad",
+    "storage_bucket": "orbit-talk-73aad.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:273325396141:android:ff6ba4e55c36238ab17624",
+        "android_client_info": {
+          "package_name": "com.crenno.orbit"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDAV0EoFjSw9woTbfzK67qqwkvnN1KPZog"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -3,32 +3,29 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    // 🟢 YENİ EKLENDİ: Firebase Eklentisi
+    id("com.google.gms.google-services")
 }
 
 android {
-    namespace = "com.example.orbit_ptt"
+    // 🟢 KURUMSAL KİMLİK: example silindi!
+    namespace = "com.crenno.orbit"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        // Desugaring (Modern saat kütüphanesi çevirici) açık kalıyor
         isCoreLibraryDesugaringEnabled = true 
-        
-        // 🟢 DÜZELTME: Java 17 yerine standart Java 8'e (1.8) döndük
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
 
-    // 🟢 DÜZELTME: Hata veren jvmToolchain silindi, çalışan klasik yönteme dönüldü
     kotlinOptions {
         jvmTarget = "1.8"
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.orbit_ptt"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        // 🟢 KURUMSAL KİMLİK: Firebase ile birebir aynı
+        applicationId = "com.crenno.orbit"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -37,8 +34,6 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
     }

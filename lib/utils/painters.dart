@@ -131,7 +131,6 @@ class SmoothWaveformPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
 
-// --- YENİ EKLENDİ: baseAngle PARAMETRESİ İLE AKILLI YÖRÜNGE HİZALAMASI ---
 class CurvedTextPainter extends CustomPainter {
   final String text;
   final double radius;
@@ -152,11 +151,11 @@ class CurvedTextPainter extends CustomPainter {
     canvas.translate(size.width / 2, size.height / 2);
     final textPainter = TextPainter(textDirection: TextDirection.ltr);
     
-    int totalSteps = text.length + (statusColor != null ? 2 : 0); 
+    // 🟢 DÜZELTME: Metnin başındaki o ekstra "Status" noktası kaldırıldı, sadece harfler kaldı.
+    int totalSteps = text.length; 
     double stepAngle = 0.17;
     double totalSweep = (totalSteps - 1) * stepAngle;
     
-    // Metni her zaman mikrofondan dışarı doğru bakan 'baseAngle' açısına ortala
     double startAngle = baseAngle - (totalSweep / 2);
     
     for (int i = 0; i < totalSteps; i++) {
@@ -168,32 +167,25 @@ class CurvedTextPainter extends CustomPainter {
       canvas.translate(x, y); 
       canvas.rotate(angle + math.pi / 2); 
       
-      if (statusColor != null && i == 0) {
-         Paint dotPaint = Paint()..color = statusColor!;
-         canvas.drawCircle(const Offset(0, 0), 4.5, dotPaint); 
-      } else if (statusColor != null && i == 1) {
-         // Boşluk
-      } else {
-         int charIndex = statusColor != null ? i - 2 : i;
-         textPainter.text = TextSpan(
-           text: text[charIndex],
-           style: TextStyle(
-             color: color.withValues(alpha: 0.95), 
-             fontSize: 8.5, 
-             fontWeight: FontWeight.bold, 
-             letterSpacing: 1.2,
-             shadows: const [
-               Shadow(
-                 color: Colors.black87,
-                 blurRadius: 4.0,
-                 offset: Offset(1.0, 1.0),
-               ),
-             ],
-           ),
-         );
-         textPainter.layout();
-         textPainter.paint(canvas, Offset(-textPainter.width / 2, -textPainter.height / 2));
-      }
+      textPainter.text = TextSpan(
+        text: text[i],
+        style: TextStyle(
+          color: color.withValues(alpha: 0.95), 
+          fontSize: 8.5, 
+          fontWeight: FontWeight.bold, 
+          letterSpacing: 1.2,
+          shadows: const [
+            Shadow(
+              color: Colors.black87,
+              blurRadius: 4.0,
+              offset: Offset(1.0, 1.0),
+            ),
+          ],
+        ),
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(-textPainter.width / 2, -textPainter.height / 2));
+      
       canvas.restore();
     }
   }

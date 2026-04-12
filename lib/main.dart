@@ -1,81 +1,73 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // 🟢 DÖNDÜRME KİLİDİ İÇİN GEREKLİ KÜTÜPHANE
-import 'package:audio_session/audio_session.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_localizations/flutter_localizations.dart'; // 🟢 EKLENDİ: Çoklu dil desteği
 
-// Ekranlar ve Servisler
+import 'firebase_options.dart'; // 🟢 EKLENDİ: Firebase konfigürasyon dosyası
+import 'screens/login_screen.dart';
 import 'screens/orbit_main_screen.dart';
-import 'services/socket_service.dart';
-import 'services/notification_service.dart'; // 🟢 YENİ EKLENDİ: Bildirim Motoru
+// 🟢 ASSUMPTION: Bir önceki adımda oluşturduğumuz yasal onay ekranı
+import 'screens/legal_onboarding_screen.dart'; 
+import 'services/notification_service.dart';
 
-void main() async {
-  // 1. Flutter motorunu güvenle başlatır
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // 🟢 YENİ: Bildirim motorunu uygulama açılır açılmaz ayağa kaldırıyoruz! 🟢
+// 🚀 3. CEPHE (DERİN UYKU): Uygulama tamamen kapalıyken (killed) Firebase'den gelen 
+// "Arama" komutunu dinleyen ve 30 saniyelik sireni başlatan gizli servis!
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // 🟢 GÜNCELLENDİ: options parametresi eklendi
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   await NotificationService().init();
 
-  // 🟢 2. EKRANI DİK (PORTRAIT) MODDA KİLİTLE! 🟢
-  // Bu kod sayesinde telefon yan çevrilse bile uygulamamız asla dönmeyecek ve UI bozulmayacak.
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-  ]);
+  // Eğer gelen kargo bir "Canlı Arama" ise:
+  if (message.data['type'] == 'call') {
+    String callerId = message.data['callerName'] ?? "Bilinmeyen";
+    
+    // Telefon hafızasındaki (kullanıcının seçtiği) zil sesini karanlıkta bile bul!
+    final prefs = await SharedPreferences.getInstance();
+    String ringtone = prefs.getString('call_ringtone') ?? "";
 
-  // 3. WHATSAPP'IN KULLANDIĞI "AGRESİF" GLOBAL SES POLİTİKASI 
-  final session = await AudioSession.instance;
-  await session.configure(AudioSessionConfiguration( // DİKKAT: Buradaki const kaldırıldı (Hata vermemesi için)
-    avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
-    avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.mixWithOthers | AVAudioSessionCategoryOptions.defaultToSpeaker,
-    avAudioSessionMode: AVAudioSessionMode.voiceChat, // Telsiz modu
-    androidAudioAttributes: const AndroidAudioAttributes(
-      contentType: AndroidAudioContentType.speech,
-      flags: AndroidAudioFlags.none,
-      usage: AndroidAudioUsage.voiceCommunication, 
-    ),
-    // DİKKAT: "gainTransientExclusive" -> Tüm diğer sesleri ez, donanımın tek sahibi benim demek!
-    androidAudioFocusGainType: AndroidAudioFocusGainType.gainTransientExclusive,
-    androidWillPauseWhenDucked: true,
-  ));
-
-  // 4. KOTLIN ÇEKİRDEĞİNE "TELSİZ MODUNA GEÇ" EMRİNİ GÖNDER 
-  if (Platform.isAndroid) {
-    const platform = MethodChannel('com.example.orbit_ptt/audio_master');
-    try {
-      final String result = await platform.invokeMethod('forceWalkieTalkieMode');
-      debugPrint("🛠️ NATIVE DONANIM: $result");
-    } catch (e) {
-      debugPrint("🛠️ Native Donanım Hatası: $e");
-    }
+    // Zili Çal!
+    await NotificationService().showCallNotification(
+      callerId, 
+      callerId, 
+      soundName: ringtone.isNotEmpty ? ringtone : null
+    );
   }
+}
 
-  // 5. Uygulama açılır açılmaz Telsiz sunucusuna bağlanır
-  SocketService().initConnection();
+void main() async {
+  // Flutter motorunu garantiye al
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  try {
+    debugPrint("🚀 Firebase başlatılıyor...");
+    // 🟢 GÜNCELLENDİ: options parametresi eklendi
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    debugPrint("✅ Firebase başarıyla başlatıldı!");
+    
+    // 🟢 BİLDİRİM MOTORU AKTİF EDİLDİ
+    debugPrint("🚀 Bildirim servisi başlatılıyor...");
+    await NotificationService().init(); 
+    debugPrint("✅ Bildirim motoru başarıyla başlatıldı!");
 
-  // Orijinal İsme Geri Dönüldü!
+    // 🟢 ARKA PLAN DİNLEYİCİSİ AKTİF EDİLDİ (KAPALIYKEN ÇALMA)
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    
+  } catch (e) {
+    // 🛑 EĞER BİR ŞEY ÇÖKERSE BEYAZ EKRANDA KALMAMASI İÇİN BURAYA DÜŞECEK
+    debugPrint("❌ KRİTİK BAŞLATMA HATASI: $e");
+  }
+  
+  // Hata olsa bile uygulamayı ZORLA başlat (Beyaz ekranı kır!)
   runApp(const OrbitApp());
 }
 
-// 🟢 ANDROID KAYAN PENCERE (OVERLAY) İÇİN ZORUNLU ARKA PLAN MOTORU 🟢
-@pragma("vm:entry-point")
-void overlayMain() {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(
-    const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Material(
-        color: Colors.transparent,
-        child: Center(
-          child: Text(
-            "Orbit Telsiz Aktif", 
-            style: TextStyle(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.bold)
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
-// Sınıf adı orijinal haline (OrbitApp) çevrildi!
 class OrbitApp extends StatelessWidget {
   const OrbitApp({super.key});
 
@@ -83,13 +75,94 @@ class OrbitApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Orbit PTT',
-      debugShowCheckedModeBanner: false, 
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: Colors.black, 
-        useMaterial3: true,
+        primaryColor: Colors.cyanAccent,
+        scaffoldBackgroundColor: Colors.black,
       ),
-      home: const OrbitMainScreen(), 
+      // 🟢 GÜNCELLENDİ: Arapça (RTL) ve diğer diller için yerelleştirme desteği
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('tr', ''), // Türkçe
+        Locale('en', ''), // İngilizce
+        Locale('ar', ''), // Arapça (Sağdan Sola)
+        // Diğer desteklenen diller...
+      ],
+      // 🟢 GÜNCELLENDİ: Rotalama logic'i CheckAuthStatus widget'ına taşındı
+      home: const CheckAuthStatus(), 
+    );
+  }
+}
+
+// 🟢 YENİ: Yasal Onay ve Auth Durumunu Sırayla Kontrol Eden Yönetici Widget
+class CheckAuthStatus extends StatefulWidget {
+  const CheckAuthStatus({super.key});
+
+  @override
+  State<CheckAuthStatus> createState() => _CheckAuthStatusState();
+}
+
+class _CheckAuthStatusState extends State<CheckAuthStatus> {
+  // İlk başta bağlantı bekleniyor olarak ayarla
+  bool? _legalAccepted;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkLegalStatus();
+  }
+
+  Future<void> _checkLegalStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      // 1. AŞAMA: Yasal Onay Kontrolü
+      // Hafızada yoksa false döner.
+      _legalAccepted = prefs.getBool('legal_accepted') ?? false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // SharedPreferences yüklenene kadar bekle
+    if (_legalAccepted == null) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: CircularProgressIndicator(color: Colors.cyanAccent),
+        ),
+      );
+    }
+
+    // Yasal onay yoksa -> Yasal Onay Ekranına git (Hepsinden ÖNCE)
+    if (!_legalAccepted!) {
+      return const LegalOnboardingScreen();
+    }
+
+    // Yasal onay varsa -> 2. AŞAMA: FirebaseAuth Durumunu Dinle
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        // Eğer Firebase bağlantısı bekleniyorsa
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: Colors.black,
+            body: Center(
+              child: CircularProgressIndicator(color: Colors.cyanAccent),
+            ),
+          );
+        }
+        // Eğer kullanıcı giriş yapmışsa -> Ana Ekran
+        if (snapshot.hasData && snapshot.data != null) {
+          return const OrbitMainScreen();
+        }
+        // Giriş yapmamışsa -> Login Ekranı
+        return const LoginScreen();
+      },
     );
   }
 }

@@ -1,33 +1,41 @@
+// ignore_for_file: prefer_final_fields
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import 'dart:async';
-import 'dart:ui'; 
-import 'dart:io'; 
-import 'package:record/record.dart'; 
-import 'package:permission_handler/permission_handler.dart';
-import 'package:image_picker/image_picker.dart'; 
-import 'package:flutter_overlay_window/flutter_overlay_window.dart'; 
+import 'dart:ui';
+import 'dart:io';
+import 'dart:collection'; 
+import 'package:record/record.dart';
+import 'package:flutter_contacts/flutter_contacts.dart' hide PermissionStatus;
+import 'package:permission_handler/permission_handler.dart' as ph;
+import 'package:image_picker/image_picker.dart';
 import 'package:audio_session/audio_session.dart';
 
-import '../models/audio_message.dart';
-import '../utils/painters.dart';
-import '../widgets/connection_arrows.dart'; 
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:shared_preferences/shared_preferences.dart'; 
+import 'package:http/http.dart' as http; 
 
-import '../widgets/saved_messages_sheet.dart';
+import '../models/audio_message.dart';
 import '../widgets/contacts_bottom_sheet.dart';
 import '../widgets/settings_bottom_sheet.dart';
-import '../widgets/orbit_message_bubbles.dart';
-import '../widgets/orbit_menu_grid.dart';
+
+import '../widgets/orbit_chat_list.dart'; 
+import '../widgets/ghost_hand_toggle.dart'; 
+import '../widgets/orbit_search_field.dart';
+import '../widgets/orbit_contact_node.dart';
+import '../widgets/orbit_ptt_area.dart';
+import '../widgets/orbit_sub_item_node.dart'; 
+
 import 'package:orbit_ptt/services/socket_service.dart';
 import 'dart:convert';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart' hide AVAudioSessionCategory; 
+import '../services/notification_service.dart';
 
-// 🟢 YENİ: Bildirim servisimizi içeri aktarıyoruz
-import '../services/notification_service.dart'; 
-
-enum UserStatus { available, busy, away }
+enum UserStatus { available, busy, away, offline }
+enum SubOrbitType { none, effects, emojis, nudge } 
 
 class OrbitMainScreen extends StatefulWidget {
   const OrbitMainScreen({super.key});
@@ -35,21 +43,24 @@ class OrbitMainScreen extends StatefulWidget {
   State<OrbitMainScreen> createState() => _OrbitMainScreenState();
 }
 
-class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderStateMixin {
-  final List<Map<String, dynamic>> baseContacts = [
-    {"name": "Ayşe Yılmaz", "isGroup": false, "status": UserStatus.available},
-    {"name": "user_atahan", "isGroup": false, "status": UserStatus.available},
-    {"name": "Proje Ekibi", "isGroup": true, "status": UserStatus.available},
-    {"name": "Mehmet Karasoy", "isGroup": false, "status": UserStatus.busy},
-  ];
+class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
+  String? _currentUserPhone;
+  bool _isSocketStarted = false;
+  AppLifecycleState _appState = AppLifecycleState.resumed;
   
+  String? _pendingCallerId;
+  String? _pendingCallerName;
+  String? _whoIsSpeaking; 
+  bool _isCallDialogOpen = false;
+  bool _isHandlingPendingCall = false;
+
   late List<Map<String, dynamic>> allContacts;
   late List<Map<String, dynamic>> originalContacts;
+  Map<String, String> _localContactsMap = {};
 
-  String _userName = "Atahan S.";
+  String _userName = "User";
   String? _userAvatarPath;
-  Color _myCustomColor = Colors.blueGrey.shade800; 
-
+  Color _myCustomColor = Colors.blueGrey.shade800;
   String _myStatus = "available";
   bool _useSpeaker = true;
   String _liveAudioPermission = "Herkes";
@@ -57,814 +68,518 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   bool _notificationsEnabled = true;
   bool _messageNotificationsEnabled = true;
   bool _callNotificationsEnabled = true;
+  bool _ratchetEnabled = true; 
+  
+  String _callRingtone = ""; 
   
   bool isSearching = false;
   bool showSearchField = false;
-  bool isBackgroundTransparent = true; 
-  bool isCircularMessageStyle = false; 
-  bool _isLeftHanded = false; 
+  
+  bool _isMenuExpanded = false;
+  bool _isActiveMenuExpanded = false; 
+  bool _isArchiveMode = false;
+  
+  bool isBackgroundTransparent = true;
+  bool isCircularMessageStyle = false;
+  bool _isLeftHanded = false;
   bool _isSettingsOpen = false;
   bool hapticEnabled = true;
-  int selfDestructSeconds = 30; 
-  int deleteFilterDays = 30; 
-  String selectedLiveAnimation = "Radar"; 
+  int selfDestructSeconds = 30;
+  int deleteFilterDays = 30;
+  String selectedLiveAnimation = "Radar";
   List<String> animationOptions = ["Mini Ekolayzır", "Radar", "Nabız", "Nefes"];
   String? _customBackgroundImagePath;
   
   double _scrollOffset = 0.0;
-  int activeIndex = -1; 
+  int activeIndex = -1;
   bool _showConnectionArrows = false;
   Timer? _arrowsTimer;
   Timer? _outgoingCallTimer;
+  Timer? _incomingRingTimer;
+  Timer? _vibrationTimer;
   
-  final Set<String> _activeLiveContacts = {}; 
-  final Map<String, Timer> _liveTimers = {}; 
+  int _interactionNodeIndex = -1;
+  double _interactionNodeOffset = 0.0;
   
+  bool _isValidOrbitDrag = false;
+  double _lastDragAngle = 0.0;
+  double _ratchetAccumulator = 0.0; 
+  int _lastRatchetTime = 0; 
+
+  final Set<String> _activeLiveContacts = {};
+  final Map<String, Timer> _liveTimers = {};
   final Set<String> _mutedContacts = {};
   final Set<String> _blockedContacts = {};
 
-  bool isWaitingForLiveApproval = false; 
-  int _liveDuration = 0; 
+  bool isWaitingForLiveApproval = false;
+  int _liveDuration = 0;
   Timer? _liveDurationTimer;
-  Timer? _backgroundLiveTimeoutTimer; 
-  bool _isCurrentlyPlayingOrRecording = false; 
-  String? _currentlyPlayingQueueItemSender; 
-  bool _showOnlyUnread = false; 
+  bool _isCurrentlyPlayingOrRecording = false;
+  String? _currentlyPlayingQueueItemSender;
+  bool _showOnlyUnread = false;
 
   late AnimationController _pulseController;
   late AnimationController _breatheController;
-  late AnimationController _dangerPulseController; 
   late AnimationController _entranceController;
+  late AnimationController _hapticAcceptPulseController;
+  late AnimationController _hapticRejectPulseController;
+  late AnimationController _hapticTerminatePulseController;
 
   final List<String> _activeLiveGroupMembers = []; 
   final AudioRecorder _audioRecorder = AudioRecorder();
   Timer? _amplitudeTimer;
   final ValueNotifier<double> _audioLevel = ValueNotifier(0.0);
-  
   final ValueNotifier<double> _incomingAudioLevel = ValueNotifier(0.0);
   Timer? _incomingAmplitudeTimer;
 
   final AudioPlayer _historyPlayer = AudioPlayer();
   AudioMessage? _currentlyPlayingMessage;
   
-  bool isRecording = false; 
-  int _recordDuration = 0; 
+  bool isRecording = false;
+  int _recordDuration = 0;
   Timer? _recordTimer;
   double _dragOffset = 0.0;
+  double _dragVerticalOffset = 0.0;
   bool _isCancelled = false;
 
-  Timer? _micDebounceTimer; 
+  Timer? _micDebounceTimer;
+  DateTime? _recordingStartTime;
 
-  final List<AudioMessage> _allMessages = []; 
+  final List<AudioMessage> _allMessages = [];
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   AudioMessage? _replyingToMessage;
 
+  bool _isIncomingCallActive = false;
+  double _pttSlideOffset = 0.0;
+
+  final Queue<AudioMessage> _liveAudioQueue = Queue<AudioMessage>();
+  bool _isProcessingLiveQueue = false;
+  Timer? _notificationDebounceTimer; 
+
+  SubOrbitType _activeSubOrbit = SubOrbitType.none;
+  double _subOrbitScrollOffset = 0.0;
+  
+  final ScrollController _activeMenuScrollController = ScrollController();
+  final ScrollController _mainMenuScrollController = ScrollController(); 
+
+  String _currentLang = 'tr';
+
+  String _t(String key) {
+    const Map<String, Map<String, String>> dict = {
+      'invite': {'tr': 'Davet Et', 'en': 'Invite', 'de': 'Einladen', 'ru': 'Пригласить', 'es': 'Invitar', 'ar': 'دعوة'},
+      'search': {'tr': 'Arama', 'en': 'Search', 'de': 'Suche', 'ru': 'Поиск', 'es': 'Buscar', 'ar': 'بحث'},
+      'saved': {'tr': 'Kayıtlılar', 'en': 'Saved', 'de': 'Gespeichert', 'ru': 'Сохраненные', 'es': 'Guardados', 'ar': 'المحفوظات'},
+      'add_contact': {'tr': 'Kişi Ekle', 'en': 'Add Contact', 'de': 'Kontakt +', 'ru': 'Добавить', 'es': 'Añadir', 'ar': 'إضافة جهة اتصال'},
+      'settings': {'tr': 'Ayarlar', 'en': 'Settings', 'de': 'Einstellungen', 'ru': 'Настройки', 'es': 'Ajustes', 'ar': 'الإعدادات'},
+      'nudge_grp': {'tr': 'Grubu Dürt', 'en': 'Nudge Group', 'de': 'Gruppe anstupsen', 'ru': 'Торкнуть группу', 'es': 'Dar toque', 'ar': 'نكز المجموعة'},
+      'send_react': {'tr': 'Tepki Gönder', 'en': 'Send Reaction', 'de': 'Reaktion senden', 'ru': 'Отпр. реакцию', 'es': 'Enviar reacción', 'ar': 'إرسال تفاعل'},
+      'voice_fx': {'tr': 'Ses Efekti', 'en': 'Voice Effect', 'de': 'Spracheffekt', 'ru': 'Голос. эффект', 'es': 'Efecto de voz', 'ar': 'تأثير الصوت'},
+      'roger': {'tr': 'Anlaşıldı', 'en': 'Roger That', 'de': 'Verstanden', 'ru': 'Понял', 'es': 'Recibido', 'ar': 'علم'},
+      'filter': {'tr': 'Okunmamışları Filtrele', 'en': 'Filter Unread', 'de': 'Ungelesene filtern', 'ru': 'Фильтр', 'es': 'Filtrar no leídos', 'ar': 'تصفية غير المقروءة'},
+      'unmute': {'tr': 'Sesi Aç', 'en': 'Unmute', 'de': 'Ton an', 'ru': 'Вкл. звук', 'es': 'Activar sonido', 'ar': 'إلغاء كتم الصوت'},
+      'mute': {'tr': 'Sessize Al', 'en': 'Mute', 'de': 'Stummschalten', 'ru': 'Выкл. звук', 'es': 'Silenciar', 'ar': 'كتم الصوت'},
+      'unblock': {'tr': 'Engeli Kaldır', 'en': 'Unblock', 'de': 'Entblocken', 'ru': 'Разблокировать', 'es': 'Desbloquear', 'ar': 'إلغاء الحظر'},
+      'block': {'tr': 'Engelle', 'en': 'Block', 'de': 'Blockieren', 'ru': 'Заблокировать', 'es': 'Bloquear', 'ar': 'حظر'},
+      'rm_orbit': {'tr': 'Yörüngeden Çıkar', 'en': 'Remove from Orbit', 'de': 'Aus Orbit entfernen', 'ru': 'Удалить с орбиты', 'es': 'Quitar de órbita', 'ar': 'إزالة من المدار'},
+      'disconnect': {'tr': 'Bağlantıyı Kes', 'en': 'Disconnect', 'de': 'Trennen', 'ru': 'Отключиться', 'es': 'Desconectar', 'ar': 'قطع الاتصال'},
+      'cancel': {'tr': 'İptal Et', 'en': 'Cancel', 'de': 'Abbrechen', 'ru': 'Отмена', 'es': 'Cancelar', 'ar': 'إلغاء'},
+      'offline': {'tr': 'Çevrimdışı', 'en': 'Offline', 'de': 'Offline', 'ru': 'Не в сети', 'es': 'Desconectado', 'ar': 'غير متصل'},
+      'online': {'tr': 'Çevrimiçi', 'en': 'Online', 'de': 'Online', 'ru': 'В сети', 'es': 'En línea', 'ar': 'متصل'},
+      'is_spk': {'tr': 'konuşuyor...', 'en': 'is speaking...', 'de': 'spricht...', 'ru': 'говорит...', 'es': 'está hablando...', 'ar': 'يتحدث...'},
+      'replying': {'tr': 'Yanıtlanıyor: ', 'en': 'Replying: ', 'de': 'Antworten: ', 'ru': 'Отвечает: ', 'es': 'Respondiendo: ', 'ar': 'يتم الرد: '},
+      'choose_fx': {'tr': 'SES EFEKTİ SEÇ', 'en': 'CHOOSE VOICE EFFECT', 'de': 'SPRACHEFFEKT WÄHLEN', 'ru': 'ВЫБРАТЬ ГОЛОСОВОЙ ЭФФЕКТ', 'es': 'ELEGIR EFECTO DE VOZ', 'ar': 'اختر تأثير الصوت'},
+      'send_re_title': {'tr': 'TEPKİ GÖNDER', 'en': 'SEND REACTION', 'de': 'REAKTION SENDEN', 'ru': 'ОТПРАВИТЬ РЕАКЦИЮ', 'es': 'ENVIAR REACCIÓN', 'ar': 'إرسال تفاعل'},
+      'nudge_grp_title': {'tr': 'GRUBUNU DÜRT', 'en': 'NUDGE GROUP', 'de': 'GRUPPE ANSTUPSEN', 'ru': 'ТОРКНУТЬ ГРУППУ', 'es': 'DAR TOQUE AL GRUPO', 'ar': 'نكز المجموعة'},
+      'nudge_all': {'tr': 'TÜMÜNÜ\nDÜRT', 'en': 'NUDGE\nALL', 'de': 'ALLE\nANSTUPSEN', 'ru': 'ТОРКНУТЬ\nВСЕХ', 'es': 'TOCAR A\nTODOS', 'ar': 'نكز\nالجميع'},
+      'unknown': {'tr': 'Bilinmeyen', 'en': 'Unknown', 'de': 'Unbekannt', 'ru': 'Неизвестный', 'es': 'Desconocido', 'ar': 'غير معروف'},
+      'is_busy': {'tr': 'şu an meşgul.', 'en': 'is busy right now.', 'de': 'ist gerade beschäftigt.', 'ru': 'сейчас занят.', 'es': 'está ocupado ahora.', 'ar': 'مشغول الآن.'},
+      'calling': {'tr': 'aranıyor...', 'en': 'calling...', 'de': 'ruft an...', 'ru': 'звонок...', 'es': 'llamando...', 'ar': 'يتصل...'},
+      'call_not_ans': {'tr': 'Davet isteği yanıtlanmadı.', 'en': 'Call request not answered.', 'de': 'Anrufanfrage nicht beantwortet.', 'ru': 'На звонок не ответили.', 'es': 'Llamada no respondida.', 'ar': 'لم يتم الرد على طلب المكالمة.'},
+      'call_canc': {'tr': 'Arama iptal edildi.', 'en': 'Call cancelled.', 'de': 'Anruf abgebrochen.', 'ru': 'Звонок отменен.', 'es': 'Llamada cancelada.', 'ar': 'تم إلغاء المكالمة.'},
+      'roger_sent': {'tr': 'Anlaşıldı gönderildi ✅', 'en': 'Roger that sent ✅', 'de': 'Verstanden gesendet ✅', 'ru': 'Принято отправлено ✅', 'es': 'Recibido enviado ✅', 'ar': 'تم إرسال علم ✅'},
+      'all_nudged': {'tr': 'Tüm grup dürtüldü!', 'en': 'Whole group nudged!', 'de': 'Ganze Gruppe angestupst!', 'ru': 'Вся группа торкнута!', 'es': '¡Todo el grupo tocado!', 'ar': 'تم نكز المجموعة بأكملها!'},
+      'sent_react': {'tr': 'sana bir tepki gönderdi.', 'en': 'sent you a reaction.', 'de': 'hat dir eine Reaktion gesendet.', 'ru': 'отправил(а) вам реакцию.', 'es': 'te envió una reacción.', 'ar': 'أرسل لك تفاعلاً.'},
+      'attention': {'tr': 'DİKKAT! telsize çağırıyor!', 'en': 'ATTENTION! calling you to radio!', 'de': 'ACHTUNG! ruft dich ans Funkgerät!', 'ru': 'ВНИМАНИЕ! вызывает вас по рации!', 'es': '¡ATENCIÓN! te llama por radio!', 'ar': 'انتباه! يدعوك للراديو!'},
+      'new_msg': {'tr': 'yeni mesaj gönderdi.', 'en': 'sent a new message.', 'de': 'hat eine neue Nachricht gesendet.', 'ru': 'отправил(а) новое сообщение.', 'es': 'envió un nuevo mensaje.', 'ar': 'أرسل رسالة جديدة.'},
+      'not_answering': {'tr': 'cevap vermiyor.', 'en': 'is not answering.', 'de': 'antwortet nicht.', 'ru': 'не отвечает.', 'es': 'no contesta.', 'ar': 'لا يرد.'},
+      'reject_busy': {'tr': 'çağrıyı reddetti veya meşgul.', 'en': 'rejected the call or is busy.', 'de': 'hat den Anruf abgelehnt oder ist beschäftigt.', 'ru': 'отклонил звонок или занят.', 'es': 'rechazó la llamada o está ocupado.', 'ar': 'رفض المكالمة أو مشغول.'},
+      'disconnected': {'tr': 'bağlantıyı kopardı.', 'en': 'disconnected.', 'de': 'hat die Verbindung getrennt.', 'ru': 'отключился.', 'es': 'se desconectó.', 'ar': 'قطع الاتصال.'},
+      'accepted_call': {'tr': 'telsiz çağrısını kabul etti!', 'en': 'accepted the radio call!', 'de': 'hat den Funkruf angenommen!', 'ru': 'принял вызов по рации!', 'es': '¡aceptó la llamada de radio!', 'ar': 'قبل مكالمة الراديو!'},
+      'missed_call': {'tr': 'Cevapsız çağrı:', 'en': 'Missed call:', 'de': 'Verpasster Anruf:', 'ru': 'Пропущенный звонок:', 'es': 'Llamada perdida:', 'ar': 'مكالمة فائتة:'},
+      'del_warn': {'tr': 'adlı ajanı yörüngeden çıkarmak istediğine emin misin?', 'en': 'are you sure you want to remove this agent from your orbit?', 'de': 'sind Sie sicher, dass Sie diesen Agenten entfernen möchten?', 'ru': 'вы уверены, что хотите удалить этого агента с орбиты?', 'es': '¿seguro que quieres quitar a este agente de tu órbita?', 'ar': 'هل أنت متأكد أنك تريد إزالة هذا الوكيل من مدارك؟'},
+      'del_btn': {'tr': 'SİL', 'en': 'DELETE', 'de': 'LÖSCHEN', 'ru': 'УДАЛИТЬ', 'es': 'ELIMINAR', 'ar': 'حذف'},
+      'removed': {'tr': 'orbitten çıkartıldı.', 'en': 'removed from orbit.', 'de': 'aus dem Orbit entfernt.', 'ru': 'удален с орбиты.', 'es': 'eliminado de la órbita.', 'ar': 'تمت إزالته من المدار.'},
+    };
+    return dict[key]?[_currentLang] ?? dict[key]?['en'] ?? key;
+  }
+
+  String _selectedVoiceEffect = "Normal";
+  final List<Map<String, dynamic>> _voiceEffects = [
+    {"name": "Normal", "icon": Icons.mic, "color": Colors.white},
+    {"name": "Askeri", "icon": Icons.radio, "color": Colors.greenAccent},
+    {"name": "Megafon", "icon": Icons.campaign, "color": Colors.amber},
+    {"name": "Ajan", "icon": Icons.masks, "color": Colors.purpleAccent},
+    {"name": "Helyum", "icon": Icons.child_care, "color": Colors.pinkAccent},
+    {"name": "Robot", "icon": Icons.smart_toy, "color": Colors.blueAccent},
+    {"name": "Uzaylı", "icon": Icons.flutter_dash, "color": Colors.tealAccent},
+    {"name": "Mağara", "icon": Icons.waves, "color": Colors.indigoAccent},
+    {"name": "Canavar", "icon": Icons.coronavirus, "color": Colors.redAccent},
+    {"name": "Radyo", "icon": Icons.speaker, "color": Colors.orangeAccent},
+  ];
+  
+  final List<FlyingEmoji> _flyingEmojis = [];
+  List<String> _recentEmojis = ['🔥', '👏', '😂', '🫡'];
+  final List<String> _allEmojis = [
+    '🔥', '👏', '😂', '🫡', '❤️', '💯', '🎉', '🤯', 
+    '😎', '👍', '👎', '👀', '🚀', '🎯', '🤬', '🥶'
+  ];
+
   List<AudioMessage> get _activeMessages {
-    if (activeIndex == -1 || allContacts[activeIndex]['isEmpty'] == true) return []; 
-    String currentContact = allContacts[activeIndex]['name'];
-    var messages = _allMessages.where((msg) => msg.contactName == currentContact).toList();
-    if (_showOnlyUnread) {
-      messages = messages.where((msg) => !msg.isMe && !msg.isRead).toList();
+    if (activeIndex == -1 || allContacts[activeIndex]['isEmpty'] == true) {
+      return [];
+    }
+    String currentContactIdentifier = allContacts[activeIndex]['isGroup'] == true 
+        ? allContacts[activeIndex]['name'] 
+        : allContacts[activeIndex]['phone'];
+        
+    var messages = _allMessages.where((msg) => msg.contactName == currentContactIdentifier).toList();
+    
+    if (_isArchiveMode) {
+       messages = messages.where((msg) => msg.isSaved && !msg.isDeleted).toList();
+    } else if (_showOnlyUnread) {
+       messages = messages.where((msg) => !msg.isMe && !msg.isRead).toList();
     }
     return messages;
   }
 
-  @override
-  void initState() {
-    super.initState();
-
-    AudioSession.instance.then((session) async {
-      await session.configure(const AudioSessionConfiguration(
-        avAudioSessionCategory: AVAudioSessionCategory.playAndRecord, 
-        avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.defaultToSpeaker, 
-        avAudioSessionMode: AVAudioSessionMode.spokenAudio,
-        androidAudioAttributes: AndroidAudioAttributes(
-          contentType: AndroidAudioContentType.speech,
-          flags: AndroidAudioFlags.none,
-          usage: AndroidAudioUsage.voiceCommunication,
-        ),
-        androidAudioFocusGainType: AndroidAudioFocusGainType.gainTransient,
-      ));
-    });
-
-    allContacts = List.from(baseContacts);
-    int maxSlots = 7;
-    for (int i = allContacts.length; i < maxSlots; i++) {
-       allContacts.add({"name": "Davet Et", "isEmpty": true});
-    }
-    originalContacts = List.from(allContacts);
-
-    _initMicrophone(); 
-
-    _historyPlayer.onPositionChanged.listen((Duration p) {
-      if (mounted && _currentlyPlayingMessage != null) {
-        int totalMs = _currentlyPlayingMessage!.durationInSeconds * 1000;
-        if (totalMs > 0) {
-          setState(() {
-            _currentlyPlayingMessage!.playProgress = p.inMilliseconds / totalMs;
-          });
-        }
-      }
-    });
-
-    _historyPlayer.onPlayerComplete.listen((_) async {
-      if (mounted && _currentlyPlayingMessage != null) {
-        setState(() {
-          _currentlyPlayingMessage!.isPlaying = false;
-          _currentlyPlayingMessage!.playProgress = 0.0;
-          _isCurrentlyPlayingOrRecording = false; 
-          
-          if (!_currentlyPlayingMessage!.isMe && !_currentlyPlayingMessage!.isSaved && !_currentlyPlayingMessage!.isDeleted && !_currentlyPlayingMessage!.isPendingDeletion) {
-             _startDeletionCountdown(_currentlyPlayingMessage!);
-          }
-          _currentlyPlayingMessage = null;
-        });
-      }
-      final session = await AudioSession.instance;
-      await session.setActive(false);
-    });
-    
-    _searchController.addListener(() {
-      if (mounted) setState(() {});
-    });
-
-    _pulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1500))..repeat();
-    _breatheController = AnimationController(vsync: this, duration: const Duration(milliseconds: 2000))..repeat(reverse: true);
-    _dangerPulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800))..repeat(reverse: true);
-    
-    _entranceController = AnimationController(vsync: this, duration: const Duration(milliseconds: 2000));
-    Future.delayed(const Duration(milliseconds: 300), () {
-      if (mounted) {
-        _entranceController.forward();
-        if (hapticEnabled) HapticFeedback.heavyImpact();
-      }
-    });
-
-    if (Platform.isAndroid) {
-      try {
-        FlutterOverlayWindow.overlayListener.listen((event) {
-          if (event == "MIC_DOWN") {
-            _startRecording();
-          } else if (event == "MIC_UP") {
-             _stopRecording(); 
-          }
-        });
-      } catch (e) {
-        debugPrint("Overlay dinleyici hatası: $e");
-      }
-    }
-
-    SocketService().onAudioRead = (messageId) {
-      if (mounted) {
-        final idx = _allMessages.indexWhere((m) => m.id == messageId);
-        if (idx != -1) {
-          setState(() {
-            final msg = _allMessages[idx];
-            msg.isRead = true; 
-            final now = DateTime.now();
-            msg.readTime = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
-            
-            if (!msg.isSaved && !msg.isDeleted && !msg.isPendingDeletion) {
-              _startDeletionCountdown(msg);
-            }
-          });
-        }
-      }
-    };
-
-    SocketService().onCallReceived = (callerId) {
-      if (mounted) {
-        if (_blockedContacts.contains(callerId)) {
-          SocketService().rejectCall(callerId);
-          return;
-        }
-
-        int idx = allContacts.indexWhere((c) => c['name'] == callerId);
-        if (idx == -1) {
-           setState(() {
-             allContacts.insert(0, {"name": callerId, "isGroup": false, "status": UserStatus.available});
-           });
-        }
-        
-        bool isDialogActive = true;
-
-        // 🟢 YENİ: Ayarlarda "Tüm Bildirimler" ve "Arama Bildirimleri" açıksa
-        if (_notificationsEnabled && _callNotificationsEnabled) {
-          NotificationService().showCallNotification(callerId);
-        }
-        
-        Timer? ringTimer = Timer(const Duration(seconds: 30), () {
-          if (isDialogActive && mounted) {
-             Navigator.of(context).pop();
-             SocketService().rejectCall(callerId); 
-             NotificationService().cancelCallNotification(); // Süre bitince bildirimi sil
-             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Cevapsız çağrı: $callerId"), backgroundColor: Colors.orange.shade800));
-          }
-        });
-
-        showGeneralDialog(
-          context: context,
-          barrierDismissible: false,
-          barrierLabel: "CallDialog",
-          transitionDuration: const Duration(milliseconds: 500),
-          pageBuilder: (context, animation, secondaryAnimation) => const SizedBox(),
-          transitionBuilder: (context, animation, secondaryAnimation, child) {
-            return SlideTransition(
-              position: Tween<Offset>(begin: const Offset(0, -1), end: Offset.zero)
-                  .animate(CurvedAnimation(parent: animation, curve: Curves.easeOutBack)),
-              child: FadeTransition(
-                opacity: animation,
-                child: SafeArea(
-                  child: Align(
-                    alignment: Alignment.topCenter,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 16.0, left: 16.0, right: 16.0),
-                      child: Material(
-                        color: Colors.transparent,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(40), 
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.65), 
-                                borderRadius: BorderRadius.circular(40),
-                                border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.4), width: 1.5),
-                                boxShadow: [
-                                  BoxShadow(color: Colors.cyanAccent.withValues(alpha: 0.2), blurRadius: 30, spreadRadius: 2)
-                                ],
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.max,
-                                children: [
-                                  Container(
-                                    width: 45, height: 45,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Colors.cyanAccent.withValues(alpha: 0.15),
-                                      border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.6), width: 2),
-                                    ),
-                                    child: const Icon(Icons.graphic_eq, color: Colors.cyanAccent, size: 22),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  
-                                  Expanded(
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(callerId, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-                                        const SizedBox(height: 2),
-                                        Text("Canlı telsiz bağlantısı...", style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12)),
-                                      ],
-                                    ),
-                                  ),
-                                  
-                                  GestureDetector(
-                                    onTap: () {
-                                      isDialogActive = false;
-                                      ringTimer.cancel();
-                                      Navigator.of(context).pop();
-                                      SocketService().rejectCall(callerId);
-                                      NotificationService().cancelCallNotification(); // 🟢 Tıklanınca bildirimi sil
-                                    },
-                                    child: Container(
-                                      width: 42, height: 42,
-                                      decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.redAccent.withValues(alpha: 0.15), border: Border.all(color: Colors.redAccent.withValues(alpha: 0.7), width: 2)),
-                                      child: const Icon(Icons.close, color: Colors.redAccent, size: 20),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  
-                                  GestureDetector(
-                                    onTap: () {
-                                      isDialogActive = false;
-                                      ringTimer.cancel();
-                                      Navigator.of(context).pop();
-                                      SocketService().acceptCall(callerId);
-                                      NotificationService().cancelCallNotification(); // 🟢 Tıklanınca bildirimi sil
-                                      setState(() {
-                                        activeIndex = allContacts.indexWhere((c) => c['name'] == callerId);
-                                        _activeLiveContacts.add(callerId);
-                                        _resetLiveTimeoutForContact(callerId);
-                                      });
-                                    },
-                                    child: Container(
-                                      width: 42, height: 42,
-                                      decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.greenAccent.withValues(alpha: 0.2), border: Border.all(color: Colors.greenAccent.shade400, width: 2)),
-                                      child: const Icon(Icons.check, color: Colors.greenAccent, size: 22),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      }
-    };
-
-    SocketService().onCallAccepted = (targetId) {
-      if (context.mounted) { 
-        _outgoingCallTimer?.cancel();
-        NotificationService().cancelCallNotification(); // 🟢
-
-        setState(() {
-          _activeLiveContacts.add(targetId);
-          _resetLiveTimeoutForContact(targetId);
-          isWaitingForLiveApproval = false;
-        });
-        
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$targetId telsiz çağrısını kabul etti!"), backgroundColor: Colors.green.shade800));
-      }
-    };
-
-    SocketService().onCallRejected = (targetId) {
-      if (context.mounted) { 
-        _outgoingCallTimer?.cancel();
-        NotificationService().cancelCallNotification(); // 🟢
-        bool wasLive = _activeLiveContacts.contains(targetId);
-        
-        setState(() {
-          isWaitingForLiveApproval = false;
-          _activeLiveContacts.remove(targetId); 
-          _liveTimers[targetId]?.cancel();
-          _liveTimers.remove(targetId);
-          if (_activeLiveContacts.isEmpty) {
-            _liveDurationTimer?.cancel();
-            _liveDuration = 0;
-          }
-        });
-        
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        
-        if (wasLive) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.phone_disabled, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                Text("$targetId canlı bağlantıyı sonlandırdı."),
-              ],
-            ),
-            backgroundColor: Colors.orange.shade800,
-          ));
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text("$targetId çağrıyı reddetti veya meşgul."), 
-            backgroundColor: Colors.red.shade800
-          ));
-        }
-      }
-    };
-
-    SocketService().onCallTimeout = (targetId) {
-      if (context.mounted) {
-        setState(() {
-          isWaitingForLiveApproval = false;
-        });
-        NotificationService().cancelCallNotification(); // 🟢
-        
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$targetId cevap vermiyor."), backgroundColor: Colors.orange.shade800));
-      }
-    };
-
-    SocketService().onAudioPlayed = (senderId, filePath, messageId) {
-      if (context.mounted) { 
-        if (_blockedContacts.contains(senderId)) return;
-
-        final now = DateTime.now();
-        String timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
-        
-        bool isLive = _activeLiveContacts.contains(senderId);
-
-        setState(() {
-          if (isLive) {
-            _isCurrentlyPlayingOrRecording = true;
-            _currentlyPlayingQueueItemSender = senderId;
-            
-            SocketService().playLiveAudio(filePath); 
-
-            _allMessages.insert(0, AudioMessage(
-              id: messageId, 
-              contactName: senderId,
-              isMe: false, 
-              durationInSeconds: 5, 
-              time: timeStr,
-              isRead: true, 
-              isLiveMessage: true, 
-              audioFilePath: filePath,
-            ));
-
-            _incomingAmplitudeTimer?.cancel();
-            _incomingAmplitudeTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
-              if (mounted) {
-                _incomingAudioLevel.value = 0.2 + (math.Random().nextDouble() * 0.8); 
-              }
-            });
-
-            Future.delayed(const Duration(seconds: 5), () {
-              if (mounted) {
-                _incomingAmplitudeTimer?.cancel();
-                _incomingAudioLevel.value = 0.0;
-                setState(() {
-                  _isCurrentlyPlayingOrRecording = false;
-                  _currentlyPlayingQueueItemSender = null;
-                });
-              }
-            });
-          } else {
-            _allMessages.insert(0, AudioMessage(
-              id: messageId, 
-              contactName: senderId,
-              isMe: false, 
-              durationInSeconds: 5, 
-              time: timeStr,
-              isRead: false, 
-              isLiveMessage: false, 
-              audioFilePath: filePath,
-            ));
-            
-            if (!_mutedContacts.contains(senderId)) {
-              if (hapticEnabled) HapticFeedback.lightImpact();
-              
-              // 🟢 YENİ: Ayarlarda açıksa Normal Sesli Mesaj Bildirimi gönder
-              if (_notificationsEnabled && _messageNotificationsEnabled) {
-                NotificationService().showMessageNotification(senderId);
-              }
-
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Row(
-                  children: [
-                    const Icon(Icons.voicemail, color: Colors.redAccent),
-                    const SizedBox(width: 10),
-                    Text("$senderId yeni bir sesli mesaj gönderdi.", style: const TextStyle(color: Colors.white)),
-                  ],
-                ),
-                backgroundColor: Colors.grey.shade900,
-                behavior: SnackBarBehavior.floating,
-                duration: const Duration(seconds: 3),
-              ));
-            }
-          }
-        });
-      }
-    };
-  }
-
-  Future<String?> _pickImage(ImageSource source, {bool isBackground = false}) async {
-    try {
-      final ImagePicker picker = ImagePicker();
-      final XFile? image = await picker.pickImage(source: source);
-      if (image != null) {
-        setState(() {
-          if (isBackground) {
-            _customBackgroundImagePath = image.path;
-          } else {
-            _userAvatarPath = image.path;
-          }
-        });
-        return image.path;
-      }
-    } catch (e) {
-      debugPrint("Resim seçme hatası: $e");
-      return null;
-    }
-    return null;
-  }
-
-  void _removeAvatar() {
-    setState(() {
-      _userAvatarPath = null;
-    });
-  }
-
-  Color _getAutoAvatarColor(String name) {
-    final List<Color> avatarColors = [
-      Colors.blueAccent, Colors.redAccent, Colors.greenAccent,
-      Colors.orangeAccent, Colors.purpleAccent, Colors.tealAccent,
-      Colors.pinkAccent, Colors.indigoAccent
-    ];
-    int hash = name.hashCode.abs();
-    return avatarColors[hash % avatarColors.length].withValues(alpha: 0.8);
-  }
-
-  Future<void> _initMicrophone() async {
-    await Permission.microphone.request();
-  }
-  
   String _formatDuration(int seconds) {
     final m = (seconds / 60).floor();
     final s = seconds % 60;
     return "${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
   }
 
-  void _startDeletionCountdown(AudioMessage msg) {
-    if (msg.isPendingDeletion || selfDestructSeconds == -1) return; 
-    if (selfDestructSeconds == 0) { 
-      setState(() => msg.isDeleted = true); 
-      return; 
+  void _triggerReaction(String emoji, {String? senderName}) {
+    if (!mounted) {
+      return;
     }
+    
+    final double randomOffset = (math.Random().nextDouble() * 120) - 60; 
+    
+    final newEmoji = FlyingEmoji(
+      id: DateTime.now().microsecondsSinceEpoch.toString() + math.Random().nextInt(1000).toString(),
+      emoji: emoji,
+      startX: (MediaQuery.of(context).size.width / 2) + randomOffset,
+      senderName: senderName, 
+    );
+
     setState(() {
-      msg.isPendingDeletion = true;
-      msg.deletionSecondsRemaining = selfDestructSeconds; 
+      _flyingEmojis.add(newEmoji);
     });
-    Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted || msg.isSaved || msg.isDeleted) {
-        timer.cancel();
-        if (mounted && msg.isSaved) {
-          setState(() => msg.isPendingDeletion = false);
-        }
-        return;
-      }
-      setState(() => msg.deletionSecondsRemaining--);
-      if (msg.deletionSecondsRemaining <= 0) {
-        timer.cancel();
+
+    Future.delayed(const Duration(milliseconds: 2500), () {
+      if (mounted) {
         setState(() {
-          msg.isDeleted = true;
-          msg.isPendingDeletion = false;
+          _flyingEmojis.removeWhere((e) => e.id == newEmoji.id);
         });
       }
     });
   }
 
-  Future<void> _playMessage(AudioMessage msg) async {
-    if (msg.isPlaying) {
-      await _historyPlayer.stop(); 
-      final session = await AudioSession.instance;
-      await session.setActive(false); 
-      
-      setState(() {
-        msg.isPlaying = false;
-        _isCurrentlyPlayingOrRecording = false;
-        _currentlyPlayingMessage = null;
-      });
-      return; 
+  void _handleEmojiSelection(String emoji) {
+    _triggerReaction(emoji); 
+    if (hapticEnabled) {
+      try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ }
     }
-
-    if (_isCurrentlyPlayingOrRecording) return; 
     
-    if (msg.audioFilePath == null || !File(msg.audioFilePath!).existsSync()) {
-      if (context.mounted) { 
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("⚠️ Bu mesajın ses dosyası bulunamadı."), backgroundColor: Colors.orange));
+    if (activeIndex != -1) {
+      bool isGroupNode = allContacts[activeIndex]['isGroup'] == true;
+      if (isGroupNode) {
+        List<dynamic> members = allContacts[activeIndex]['members'] ?? [];
+        for (var m in members) {
+          SocketService().sendReaction(m.toString(), _currentUserPhone!, emoji);
+        }
+      } else {
+        String targetPhone = allContacts[activeIndex]['phone'];
+        SocketService().sendReaction(targetPhone, _currentUserPhone!, emoji);
       }
-      return;
     }
 
     setState(() {
-      _isCurrentlyPlayingOrRecording = true; 
-      msg.isPlaying = true;
-      _currentlyPlayingMessage = msg; 
-      
-      if (!msg.isMe && !msg.isRead) {
-         msg.isRead = true;
-         final now = DateTime.now();
-         msg.readTime = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
-         SocketService().sendAudioRead(msg.contactName, msg.id);
+      _recentEmojis.remove(emoji); 
+      _recentEmojis.insert(0, emoji); 
+      if (_recentEmojis.length > 4) {
+        _recentEmojis = _recentEmojis.sublist(0, 4); 
       }
     });
-
-    try {
-      await _historyPlayer.stop(); 
-      final session = await AudioSession.instance;
-      await session.setActive(true);
-
-      await _historyPlayer.setVolume(1.0); 
-      await _historyPlayer.setPlaybackRate(msg.playbackSpeed); 
-      await _historyPlayer.setSource(DeviceFileSource(msg.audioFilePath!)); 
-      
-      if (msg.playProgress > 0.0 && msg.playProgress < 1.0) {
-          int seekMs = (msg.durationInSeconds * 1000 * msg.playProgress).round();
-          await _historyPlayer.seek(Duration(milliseconds: seekMs)); 
-      }
-      await _historyPlayer.resume(); 
-    } catch (e) {
-      debugPrint("Geçmiş mesaj çalınamadı: $e");
-      await _historyPlayer.stop(); 
-      final session = await AudioSession.instance;
-      await session.setActive(false); 
-      
-      setState(() { 
-        msg.isPlaying = false; 
-        _isCurrentlyPlayingOrRecording = false; 
-        _currentlyPlayingMessage = null;
-      });
-    }
   }
 
-  void _startRecording() {
-    if (isRecording || activeIndex == -1 || allContacts[activeIndex]['isEmpty'] == true) return; 
-
-    setState(() {
-      isRecording = true;
-      _isCurrentlyPlayingOrRecording = true; 
-      _recordDuration = 0;
-      _dragOffset = 0.0;
-      _isCancelled = false;
-    });
-    
-    if (hapticEnabled) HapticFeedback.lightImpact();
-    
-    String currentTarget = allContacts[activeIndex]['name'];
-    if (_activeLiveContacts.contains(currentTarget)) {
-      _resetLiveTimeoutForContact(currentTarget); 
+  List<Map<String, dynamic>> _getSubOrbitItems() {
+    if (_activeSubOrbit == SubOrbitType.effects) {
+      return _voiceEffects;
     }
+    
+    if (_activeSubOrbit == SubOrbitType.emojis) {
+      List<String> sortedEmojis = List.from(_recentEmojis);
+      for (var e in _allEmojis) {
+        if (!sortedEmojis.contains(e)) {
+          sortedEmojis.add(e);
+        }
+      }
+      return sortedEmojis.map((e) => {"name": "Tepki", "emoji": e, "color": Colors.pinkAccent}).toList();
+    }
+    
+    if (_activeSubOrbit == SubOrbitType.nudge && activeIndex != -1) {
+      bool isGroup = allContacts[activeIndex]['isGroup'] == true;
+      if (isGroup) {
+        List<dynamic> members = allContacts[activeIndex]['members'] ?? [];
+        return members.map((m) {
+          String phone = m.toString();
+          String name = _localContactsMap[phone] ?? phone;
+          return {"name": name, "icon": Icons.touch_app, "color": Colors.orangeAccent, "phone": phone};
+        }).toList();
+      }
+    }
+    return [];
+  }
 
-    _micDebounceTimer?.cancel();
-    _micDebounceTimer = Timer(const Duration(milliseconds: 300), () async {
-       try {
-         if (await _audioRecorder.hasPermission()) {
-           if (await _audioRecorder.isRecording()) {
-             await _audioRecorder.stop();
-           }
-
-           if (_currentlyPlayingMessage != null) {
-              await _historyPlayer.stop(); 
-              final session = await AudioSession.instance;
-              await session.setActive(false); 
-              setState(() {
-                _currentlyPlayingMessage!.isPlaying = false; 
-                _currentlyPlayingMessage = null;
-                _isCurrentlyPlayingOrRecording = false; 
-              });
-           }
-           await SocketService().stopAudio(); 
-
-           final Directory tempDir = await getTemporaryDirectory();
-           final String tempPath = '${tempDir.path}/my_orbit_record_${DateTime.now().millisecondsSinceEpoch}.wav';
-
-           await _audioRecorder.start(
-             const RecordConfig(encoder: AudioEncoder.wav, sampleRate: 16000, numChannels: 1), 
-             path: tempPath
-           );
-
-           if (!mounted) return;
-
-           _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 80), (timer) async {
-             try {
-               if (isRecording && await _audioRecorder.isRecording()) {
-                  final amplitude = await _audioRecorder.getAmplitude();
-                  double normalized = (amplitude.current + 60) / 60; 
-                  if (mounted) setState(() => _audioLevel.value = normalized.clamp(0.0, 1.0)); 
-               }
-             } catch (e) {
-                debugPrint("Ses okuma hatası: $e");
-             }
-           });
-
-           _recordTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-             if (mounted) setState(() => _recordDuration++);
-           });
-         }
-       } catch (e) {
-         debugPrint("Kayıt Hatası: $e");
-         if (mounted) setState(() { isRecording = false; _isCurrentlyPlayingOrRecording = false; });
+  void _openSubOrbit(SubOrbitType type) {
+    if (hapticEnabled) { 
+      try { HapticFeedback.mediumImpact(); } catch (_) { /* ignore */ } 
+    }
+    setState(() {
+       _activeSubOrbit = type;
+       _subOrbitScrollOffset = 0.0;
+       if (showSearchField) {
+         _closeSearchMode();
        }
     });
   }
 
-  void _updateRecordingDrag(LongPressMoveUpdateDetails details) {
-    if (!isRecording) return;
+  void _onSubItemTapped(Map<String, dynamic> item) {
+    if (hapticEnabled) { 
+      try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ } 
+    }
+    
+    if (_activeSubOrbit == SubOrbitType.effects) {
+       setState(() { _selectedVoiceEffect = item['name']; });
+    } 
+    else if (_activeSubOrbit == SubOrbitType.emojis) {
+       _handleEmojiSelection(item['emoji']);
+    }
+    else if (_activeSubOrbit == SubOrbitType.nudge) {
+       String phone = item['phone'];
+       SocketService().sendNudge(phone, _currentUserPhone!, _userName);
+       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${item['name']} ${_t('all_nudged').replaceAll('Tüm grup', '')}"), duration: const Duration(seconds: 1)));
+    }
+    
+    setState(() => _activeSubOrbit = SubOrbitType.none);
+  }
+
+  void _sortOrbitContactsByRecent() {
+    if (!mounted) {
+      return;
+    }
+    DateTime getLatestInteraction(Map<String, dynamic> contact) {
+      if (contact['isEmpty'] == true) {
+        return DateTime.fromMillisecondsSinceEpoch(0);
+      }
+      String identifier = contact['isGroup'] == true ? contact['name'] : contact['phone'];
+      var messages = _allMessages.where((m) => m.contactName == identifier).toList();
+      if (messages.isEmpty) {
+        return DateTime.fromMillisecondsSinceEpoch(0);
+      }
+      int? timestamp = int.tryParse(messages.first.id.replaceAll(RegExp(r'[^0-9]'), ''));
+      return DateTime.fromMillisecondsSinceEpoch(timestamp ?? 0);
+    }
+    originalContacts.sort((a, b) {
+      if (a['isEmpty'] == true && b['isEmpty'] != true) return 1;
+      if (b['isEmpty'] == true && a['isEmpty'] != true) return -1;
+      if (a['isEmpty'] == true && b['isEmpty'] == true) return 0;
+      DateTime timeA = getLatestInteraction(a);
+      DateTime timeB = getLatestInteraction(b);
+      if (timeA.millisecondsSinceEpoch == 0 && timeB.millisecondsSinceEpoch == 0) {
+        return (a['name'] ?? "").compareTo(b['name'] ?? "");
+      }
+      return timeB.compareTo(timeA); 
+    });
     setState(() {
-      double moveDelta = details.localOffsetFromOrigin.dx;
-      if (_isLeftHanded) {
-        _dragOffset = moveDelta.clamp(0.0, 150.0); 
-        _isCancelled = _dragOffset > 100;
-      } else {
-        _dragOffset = moveDelta.clamp(-150.0, 0.0); 
-        _isCancelled = _dragOffset < -100;
+      if (!isSearching && !_isArchiveMode) {
+        allContacts = List.from(originalContacts);
       }
     });
   }
 
-  Future<void> _stopRecording() async {
-    if (!isRecording) return; 
-    _micDebounceTimer?.cancel();
+  void _startLiveTimerIfNeeded() {
+    if (_liveDurationTimer != null && _liveDurationTimer!.isActive) {
+      return;
+    }
+    _liveDuration = 0;
+    _liveDurationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted && _activeLiveContacts.isNotEmpty) {
+        setState(() => _liveDuration++);
+      } else {
+        timer.cancel();
+        if (mounted) {
+          setState(() => _liveDuration = 0);
+        }
+      }
+    });
+  }
 
-    setState(() { isRecording = false; _audioLevel.value = 0.0; });
-    _amplitudeTimer?.cancel();
-    _recordTimer?.cancel();
-    
-    String? path;
+  Future<void> _processLiveQueue() async {
+    if (_isProcessingLiveQueue || _liveAudioQueue.isEmpty) {
+      return;
+    }
+    _isProcessingLiveQueue = true;
+    final msg = _liveAudioQueue.removeFirst();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isCurrentlyPlayingOrRecording = true;
+      _currentlyPlayingQueueItemSender = msg.senderName;
+    });
+    _incomingAmplitudeTimer?.cancel();
+    _incomingAmplitudeTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (mounted) {
+        _incomingAudioLevel.value = 0.2 + (math.Random().nextDouble() * 0.8);
+      }
+    });
     try {
-      if (await _audioRecorder.isRecording()) {
-         path = await _audioRecorder.stop();
+      final session = await AudioSession.instance;
+      await session.setActive(true).catchError((e) { return false; });
+      await _historyPlayer.setVolume(1.0);
+      if (msg.audioFilePath != null && File(msg.audioFilePath!).existsSync()) {
+         await _historyPlayer.setSource(DeviceFileSource(msg.audioFilePath!));
+         await _historyPlayer.resume();
+         await _historyPlayer.onPlayerComplete.first;
+      } else {
+         await Future.delayed(const Duration(seconds: 2));
       }
     } catch (e) {
-       debugPrint("Kaydı durdurma hatası: $e");
+      debugPrint("Kuyruk Hatası: $e");
     }
-
-    setState(() { _isCurrentlyPlayingOrRecording = false; });
-
-    if (_isCancelled) {
-      if (hapticEnabled) HapticFeedback.heavyImpact();
-    } else if (path != null) {
-      final audioFile = File(path);
-      if (audioFile.existsSync() && audioFile.lengthSync() > 100) {
-          if (hapticEnabled) HapticFeedback.lightImpact();
-          
-          final now = DateTime.now();
-          String timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
-          
-          final newMsg = AudioMessage(
-            id: DateTime.now().millisecondsSinceEpoch.toString(),
-            contactName: allContacts[activeIndex]['name'],
-            isMe: true, durationInSeconds: _recordDuration, time: timeStr,
-            isRead: _activeLiveContacts.contains(allContacts[activeIndex]['name']), 
-            isLiveMessage: _activeLiveContacts.contains(allContacts[activeIndex]['name']), 
-            repliedToMessageId: _replyingToMessage?.id, audioFilePath: path,
-          );
-          
-          setState(() { _allMessages.insert(0, newMsg); });
-          
-          try {
-            final List<int> audioBytes = await audioFile.readAsBytes();
-            final String base64Audio = base64Encode(audioBytes);
-            SocketService().sendAudio(newMsg.contactName, base64Audio, newMsg.id);
-            if (_activeLiveContacts.contains(newMsg.contactName)) _resetLiveTimeoutForContact(newMsg.contactName); 
-          } catch (e) {
-            debugPrint("❌ Gönderme hatası: $e");
-          }
-      }
+    _incomingAmplitudeTimer?.cancel();
+    if (mounted) {
+      _incomingAudioLevel.value = 0.0;
     }
-    setState(() { _dragOffset = 0.0; _isCancelled = false; _replyingToMessage = null; });
+    if (mounted) {
+      setState(() {
+        _isCurrentlyPlayingOrRecording = false;
+        _currentlyPlayingQueueItemSender = null;
+      });
+    }
+    _isProcessingLiveQueue = false;
+    if (_liveAudioQueue.isNotEmpty) {
+      _processLiveQueue();
+    }
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    _focusNode.dispose();
-    _amplitudeTimer?.cancel();
-    _recordTimer?.cancel();
-    _micDebounceTimer?.cancel(); 
-    _backgroundLiveTimeoutTimer?.cancel(); 
-    _liveDurationTimer?.cancel();
-    _arrowsTimer?.cancel();
-    _outgoingCallTimer?.cancel(); 
-    for (var timer in _liveTimers.values) { timer.cancel(); }
-    _audioRecorder.dispose(); 
-    _pulseController.dispose();
-    _breatheController.dispose();
-    _dangerPulseController.dispose();
-    _entranceController.dispose();
-    _incomingAmplitudeTimer?.cancel(); 
-    _historyPlayer.dispose();
-    super.dispose();
-  }
-
-  void _endLiveConnection() {
-    if (activeIndex != -1) {
-      String contactName = allContacts[activeIndex]['name'];
-      if (_activeLiveContacts.contains(contactName)) {
-        SocketService().rejectCall(contactName); 
-        setState(() {
-          _activeLiveContacts.remove(contactName);
-          _liveTimers[contactName]?.cancel();
-          _liveTimers.remove(contactName);
-          if (_activeLiveContacts.isEmpty) {
-            _liveDurationTimer?.cancel();
-            _liveDuration = 0;
-          }
-        });
-        if (hapticEnabled) HapticFeedback.heavyImpact();
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(Icons.phone_disabled, color: Colors.white, size: 18),
-                  const SizedBox(width: 8),
-                  Text("$contactName ile bağlantı kesildi."),
-                ],
-              ),
-              backgroundColor: Colors.red.shade800,
-              duration: const Duration(seconds: 2),
-            )
-          );
+  void _handleFCMMessage(RemoteMessage message) {
+    String? callerId;
+    String? displayName;
+    if (message.data.containsKey('callerId')) {
+      callerId = message.data['callerId']?.toString().replaceAll(RegExp(r'[^\d+]'), '');
+    } else if (message.notification?.body != null) {
+      String body = message.notification!.body!;
+      if (body.contains("canlı bağlantı istiyor") || body.contains("live connection")) {
+        displayName = body.replaceAll("📞 ", "").replaceAll(" canlı bağlantı istiyor...", "").replaceAll(" is requesting live connection...", "").trim();
+        var contact = originalContacts.firstWhere((c) => c['name'] == displayName, orElse: () => <String, dynamic>{});
+        if (contact.isNotEmpty && contact.containsKey('phone')) {
+          callerId = contact['phone'].replaceAll(RegExp(r'[^\d+]'), '');
+        } else {
+          callerId = displayName.replaceAll(RegExp(r'[^\d+]'), ''); 
         }
       }
     }
+    if (callerId != null) {
+      _pendingCallerId = callerId;
+      _pendingCallerName = displayName ?? callerId;
+    }
   }
 
-  void _resetLiveTimeoutForContact(String contactName) {
-    _liveTimers[contactName]?.cancel(); 
-    _liveTimers[contactName] = Timer(const Duration(seconds: 30), () {
-      if (mounted) {
+  @override
+  void initState() {
+    super.initState();
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    WidgetsBinding.instance.addObserver(this);
+    allContacts = List.generate(7, (index) => {"name": "Davet Et", "isEmpty": true});
+    originalContacts = List.from(allContacts);
+    _pulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1500))..repeat();
+    _breatheController = AnimationController(vsync: this, duration: const Duration(milliseconds: 2000))..repeat(reverse: true);
+    _entranceController = AnimationController(vsync: this, duration: const Duration(milliseconds: 2000));
+    _hapticAcceptPulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 600))..repeat(reverse: true);
+    _hapticRejectPulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 600))..repeat(reverse: true);
+    _hapticTerminatePulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1500))..repeat(reverse: true);
+
+    FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
+      if (message != null) {
+        _handleFCMMessage(message);
+      }
+    });
+
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      _handleFCMMessage(message);
+      if (_appState == AppLifecycleState.resumed && _pendingCallerId != null) {
+         _handlePendingCallRequest(_pendingCallerId!, _pendingCallerName ?? _pendingCallerId!);
+      }
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) { _secureStarter(); });
+
+    AudioSession.instance.then((session) async {
+      await session.configure(const AudioSessionConfiguration.speech());
+    }).catchError((e) {
+      debugPrint("AudioSession yapılandırma hatası: $e");
+    });
+
+    _historyPlayer.onPositionChanged.listen((Duration p) {
+      if (mounted && _currentlyPlayingMessage != null && !_isProcessingLiveQueue) {
+        int totalMs = _currentlyPlayingMessage!.durationInSeconds * 1000;
+        if (totalMs > 0) {
+          setState(() { _currentlyPlayingMessage!.playProgress = p.inMilliseconds / totalMs; });
+        }
+      }
+    });
+
+    _historyPlayer.onPlayerComplete.listen((_) async {
+      if (mounted && _currentlyPlayingMessage != null && !_isProcessingLiveQueue) {
         setState(() {
-          _activeLiveContacts.remove(contactName);
-          _liveTimers.remove(contactName);
+          _currentlyPlayingMessage!.isPlaying = false;
+          _currentlyPlayingMessage!.playProgress = 0.0;
+          _isCurrentlyPlayingOrRecording = false;
+          if (!_currentlyPlayingMessage!.isMe && !_currentlyPlayingMessage!.isSaved && !_currentlyPlayingMessage!.isDeleted && !_currentlyPlayingMessage!.isPendingDeletion) {
+             _startDeletionCountdown(_currentlyPlayingMessage!);
+          }
+          _currentlyPlayingMessage = null;
+        });
+        final session = await AudioSession.instance;
+        session.setActive(false).catchError((_) => false); 
+      }
+    });
+
+    _setupSocketListeners();
+  }
+
+  Future<void> _loadLanguage() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _currentLang = prefs.getString('app_lang') ?? 'tr';
+    });
+  }
+
+  void _resetLiveTimeoutForContact(String contactPhone) {
+    _liveTimers[contactPhone]?.cancel();
+    _liveTimers[contactPhone] = Timer(const Duration(seconds: 30), () {
+      if (mounted) {
+        if (isRecording || _whoIsSpeaking == contactPhone || _isCurrentlyPlayingOrRecording || _liveAudioQueue.isNotEmpty) {
+            _resetLiveTimeoutForContact(contactPhone);
+            return;
+        }
+        setState(() {
+          _activeLiveContacts.remove(contactPhone);
+          _liveTimers.remove(contactPhone);
           if (_activeLiveContacts.isEmpty) {
             _liveDurationTimer?.cancel();
             _liveDuration = 0;
@@ -884,81 +599,1022 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     });
   }
 
-  void _requestLiveConnection(int index) {
-    String name = allContacts[index]['name'];
-    if (allContacts[index]['status'] == UserStatus.busy && !allContacts[index]['isGroup']) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$name şu an meşgul."), backgroundColor: Colors.orange));
-      return;
-    }
-    
-    SocketService().startCall(name);
-    
-    setState(() {
-      activeIndex = index;
-      isWaitingForLiveApproval = true;
-      _replyingToMessage = null; 
-    });
-    
-    _triggerConnectionArrows();
-    
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Row(
-        children: [
-          const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.cyanAccent, strokeWidth: 2)),
-          const SizedBox(width: 12),
-          Text("$name aranıyor...", style: const TextStyle(color: Colors.white)),
-        ],
-      ),
-      backgroundColor: Colors.black87,
-      duration: const Duration(seconds: 30), 
-    ));
-
-    _outgoingCallTimer?.cancel();
-    _outgoingCallTimer = Timer(const Duration(seconds: 30), () {
-      if (mounted && isWaitingForLiveApproval) {
-        SocketService().cancelCall(name); 
-        setState(() {
-          isWaitingForLiveApproval = false;
-        });
-        
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text("Davet isteği yanıtlanmadı."), 
-          backgroundColor: Colors.red.shade800
-        ));
+  void _setupSocketListeners() {
+    SocketService().onAudioRead = (messageId, readerId, readerName, isLiveRead) {
+      if (mounted) {
+        final idx = _allMessages.indexWhere((m) => m.id == messageId);
+        if (idx != -1) {
+          setState(() {
+            final msg = _allMessages[idx];
+            String currentType = isLiveRead ? "live" : "history";
+            String safeName = readerName ?? _localContactsMap[readerId] ?? readerId;
+            msg.listenedBy[safeName] = currentType;
+            msg.isRead = true;
+            final now = DateTime.now();
+            msg.readTime = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
+            if (!msg.isSaved && !msg.isDeleted && !msg.isPendingDeletion) {
+              _startDeletionCountdown(msg);
+            }
+          });
+        }
       }
-    });
-
-    Future.delayed(const Duration(seconds: 2), () {
-      if (!mounted) return;
-      if (_activeLiveContacts.contains(name)) {
-         setState(() {
-          isWaitingForLiveApproval = false;
-          if (_activeLiveContacts.length == 1) {
-            _liveDuration = 0; 
-            _liveDurationTimer?.cancel();
-            _liveDurationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-              if (mounted && _activeLiveContacts.isNotEmpty) {
-                setState(() => _liveDuration++);
-              } else {
-                timer.cancel();
-              }
-            });
+    };
+    SocketService().onUserSpeaking = (callerId, isSpeaking) {
+      if (mounted) {
+        setState(() {
+          if (isSpeaking) { 
+            _whoIsSpeaking = callerId; 
+            _resetLiveTimeoutForContact(callerId); 
+          } else { 
+            if (_whoIsSpeaking == callerId) {
+              _whoIsSpeaking = null; 
+            }
           }
         });
+      }
+    };
+    SocketService().onCallMissed = (callerId) {
+      if (mounted) {
+        _incomingRingTimer?.cancel(); _vibrationTimer?.cancel();
+        setState(() { _pendingCallerId = null; _pendingCallerName = null; _isHandlingPendingCall = false; _isIncomingCallActive = false; });
+        _closeCallDialogSafely();
+        try { NotificationService().cancelCallNotification(); } catch (_) { /* ignore */ }
+        String displayName = _localContactsMap[callerId] ?? callerId;
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$displayName ${_t('call_canc').toLowerCase()}"), backgroundColor: Colors.orange.shade800));
+      }
+    };
+    SocketService().onCallReceived = (callerId) async {
+      if (mounted) {
+        if (_blockedContacts.contains(callerId)) { 
+          SocketService().rejectCall(callerId); 
+          return; 
+        }
+        if (_isCallDialogOpen || _isHandlingPendingCall) {
+          return;
+        }
+        int idx = allContacts.indexWhere((c) => c['phone'] == callerId);
+        if (idx == -1) {
+           setState(() {
+             String displayName = _localContactsMap[callerId] ?? callerId;
+             int emptyIdx = allContacts.lastIndexWhere((c) => c['isEmpty'] == true);
+             if (emptyIdx != -1) {
+               allContacts[emptyIdx] = {"name": displayName, "phone": callerId, "isGroup": false, "status": UserStatus.available};
+             } else {
+               allContacts.insert(0, {"name": displayName, "phone": callerId, "isGroup": false, "status": UserStatus.available});
+             }
+           });
+        }
+        String displayName = _localContactsMap[callerId] ?? callerId;
+        _pendingCallerId = callerId; _pendingCallerName = displayName;
+        _incomingRingTimer?.cancel(); _vibrationTimer?.cancel();
+        _incomingRingTimer = Timer(const Duration(seconds: 30), () {
+          if (mounted) {
+             _closeCallDialogSafely(); 
+             SocketService().rejectCall(callerId);
+             try { NotificationService().cancelCallNotification(); } catch (_) { /* ignore */ }
+             _vibrationTimer?.cancel();
+             setState(() { _pendingCallerId = null; _pendingCallerName = null; _isHandlingPendingCall = false; _isIncomingCallActive = false; });
+             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${_t('missed_call')} $displayName"), backgroundColor: Colors.orange.shade800));
+          }
+        });
+        if (_appState != AppLifecycleState.resumed) {
+          if (_notificationsEnabled && _callNotificationsEnabled) {
+            try { NotificationService().showCallNotification(callerId, displayName, soundName: _callRingtone.isNotEmpty ? _callRingtone : null); } catch (_) { /* ignore */ }
+          }
+        } else {
+          _vibrationTimer = Timer.periodic(const Duration(seconds: 2), (timer) { try { if (hapticEnabled) HapticFeedback.vibrate(); } catch (_) { /* ignore */ } });
+          setState(() { _isIncomingCallActive = true; });
+        }
+      }
+    };
+    SocketService().onCallAccepted = (targetId) async {
+      _outgoingCallTimer?.cancel();
+      try { NotificationService().cancelCallNotification(); } catch (_) { /* ignore */ }
+      AudioSession.instance.then((session) { session.setActive(true).catchError((_) => false); });
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _activeLiveContacts.add(targetId); _resetLiveTimeoutForContact(targetId);
+        if (activeIndex != -1 && allContacts[activeIndex]['isGroup'] == true) {
+            String memberName = _localContactsMap[targetId] ?? targetId;
+            String initials = _getInitials(memberName); 
+            if (!_activeLiveGroupMembers.contains(initials)) {
+              _activeLiveGroupMembers.add(initials);
+            }
+        }
+        isWaitingForLiveApproval = false; 
+        _isIncomingCallActive = false; 
+        _startLiveTimerIfNeeded(); 
+      });
+      String displayName = _localContactsMap[targetId] ?? targetId;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$displayName ${_t('accepted_call')}"), backgroundColor: Colors.green.shade800));
+    };
+    SocketService().onCallRejected = (targetId) {
+      if (mounted) {
+        _outgoingCallTimer?.cancel();
+        try { NotificationService().cancelCallNotification(); } catch (_) { /* ignore */ }
+        bool wasLive = _activeLiveContacts.contains(targetId);
+        setState(() {
+          _activeLiveContacts.remove(targetId); 
+          _liveTimers[targetId]?.cancel(); 
+          _liveTimers.remove(targetId);
+          String memberName = _localContactsMap[targetId] ?? targetId;
+          String initials = _getInitials(memberName);
+          _activeLiveGroupMembers.remove(initials);
+          if (_activeLiveContacts.isEmpty) { 
+            isWaitingForLiveApproval = false; 
+            _isIncomingCallActive = false; 
+            _liveDurationTimer?.cancel(); 
+            _liveDuration = 0; 
+          }
+        });
+        String displayName = _localContactsMap[targetId] ?? targetId;
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        if (wasLive) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Row(children: [const Icon(Icons.phone_disabled, color: Colors.white, size: 18), const SizedBox(width: 8), Text("$displayName ${_t('disconnected')}")]), backgroundColor: Colors.orange.shade800));
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$displayName ${_t('reject_busy')}"), backgroundColor: Colors.red.shade800));
+        }
+      }
+    };
+    SocketService().onCallTimeout = (targetId) {
+      if (mounted) {
+        setState(() { 
+          _activeLiveContacts.remove(targetId); 
+          if (_activeLiveContacts.isEmpty) { 
+            isWaitingForLiveApproval = false; 
+            _isIncomingCallActive = false; 
+          } 
+        });
+        try { NotificationService().cancelCallNotification(); } catch (_) { /* ignore */ }
+        String displayName = _localContactsMap[targetId] ?? targetId;
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$displayName ${_t('not_answering')}"), backgroundColor: Colors.orange.shade800));
+      }
+    };
+    SocketService().onAudioPlayed = (senderId, audioUrl, messageId) async {
+      if (!mounted) {
+        return;
+      }
+      if (_blockedContacts.contains(senderId)) {
+        return;
+      }
+      final now = DateTime.now();
+      String timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
+      bool isLive = _activeLiveContacts.contains(senderId);
+      String displayName = _localContactsMap[senderId] ?? senderId;
+      String messageContactName = senderId;
+      if (activeIndex != -1 && allContacts[activeIndex]['isGroup'] == true) {
+          List<dynamic> members = allContacts[activeIndex]['members'] ?? [];
+          if (members.contains(senderId)) {
+            messageContactName = allContacts[activeIndex]['name']; 
+          }
+      } else {
+          int idx = allContacts.indexWhere((c) => c['phone'] == senderId);
+          if (idx == -1) {
+             int emptyIdx = allContacts.lastIndexWhere((c) => c['isEmpty'] == true);
+             if (emptyIdx != -1) {
+               allContacts[emptyIdx] = {"name": displayName, "phone": senderId, "isGroup": false, "status": UserStatus.available}; 
+             }
+          }
+      }
+      String localFilePath = audioUrl;
+      if (audioUrl.startsWith('http')) {
+         try {
+           final directory = await getTemporaryDirectory();
+           localFilePath = '${directory.path}/orbit_live_$messageId.m4a';
+           File file = File(localFilePath);
+           if (!file.existsSync()) {
+              final fileResponse = await http.get(Uri.parse(audioUrl));
+              await file.writeAsBytes(fileResponse.bodyBytes);
+           }
+         } catch (e) { 
+           return; 
+         }
+      }
+      if (!mounted) {
+        return;
+      }
+      final newMsg = AudioMessage(id: messageId, contactName: messageContactName, senderName: displayName, isMe: false, durationInSeconds: 0, time: timeStr, isRead: isLive, isLiveMessage: isLive, audioFilePath: localFilePath);
+      setState(() {
+        _allMessages.insert(0, newMsg); _sortOrbitContactsByRecent(); 
+        if (isLive) { 
+          _liveAudioQueue.add(newMsg); 
+          _processLiveQueue(); 
+          SocketService().sendAudioRead(messageContactName, messageId, true, _userName); 
+        } 
+      });
+      if (!isLive) {
+        if (!_mutedContacts.contains(messageContactName)) { 
+          if (hapticEnabled) { try { HapticFeedback.lightImpact(); } catch (_) { /* ignore */ } }
+          if (_notificationsEnabled && _messageNotificationsEnabled) {
+            _notificationDebounceTimer?.cancel();
+            _notificationDebounceTimer = Timer(const Duration(seconds: 1), () { try { NotificationService().showMessageNotification(displayName); } catch (_) { /* ignore */ } });
+          }
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Row(children: [const Icon(Icons.voicemail, color: Colors.redAccent), const SizedBox(width: 10), Text("$displayName ${_t('new_msg')}", style: const TextStyle(color: Colors.white))]), backgroundColor: Colors.grey.shade900, behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 3)));
+        }
+      }
+    };
+    SocketService().onNudgeReceived = (senderId, senderName) async {
+      if (!mounted) {
+        return;
+      }
+      if (_blockedContacts.contains(senderId)) {
+        return; 
+      }
+      for (int i = 0; i < 5; i++) {
+        if (hapticEnabled) { try { HapticFeedback.vibrate(); } catch (_) { /* ignore */ } }
+        await Future.delayed(const Duration(milliseconds: 400));
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        String txt = _t('attention');
+        // 🟢 DÜZELTME: Metin birleştirmede Interpolation kullanıldı.
+        String p1 = '${txt.split('!')[0]}!';
+        String p2 = txt.substring(p1.length).trim();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Row(children: [const Icon(Icons.vibration, color: Colors.orangeAccent), const SizedBox(width: 10), Expanded(child: Text("$p1 $senderName $p2", style: const TextStyle(fontWeight: FontWeight.bold)))]), backgroundColor: Colors.deepOrange.shade900, behavior: SnackBarBehavior.floating));
+      }
+    };
+    
+    SocketService().onRogerThatReceived = (senderId, senderName) async {
+      if (!mounted) {
+        return;
+      }
+      if (_blockedContacts.contains(senderId)) {
+        return;
+      }
+      
+      String sName = senderName;
+      if (sName.isEmpty) {
+        sName = _localContactsMap[senderId] ?? senderId;
+      }
+      
+      bool isGroup = activeIndex != -1 && allContacts[activeIndex]['isGroup'] == true;
+      
+      _triggerReaction("👍", senderName: isGroup ? sName : null);
+
+      if (hapticEnabled) {
+        try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ }
+        await Future.delayed(const Duration(milliseconds: 150));
+        try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ }
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Row(children: [const Icon(Icons.thumb_up, color: Colors.greenAccent), const SizedBox(width: 10), Text("$sName: ${_t('roger')}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))]), backgroundColor: Colors.green.shade900, behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 2)));
+      }
+    };
+    
+    SocketService().onReactionReceived = (senderId, emoji) {
+      if (!mounted) {
+        return;
+      }
+      if (_blockedContacts.contains(senderId)) {
+        return;
+      }
+      
+      String senderName = _localContactsMap[senderId] ?? senderId;
+      bool isGroup = activeIndex != -1 && allContacts[activeIndex]['isGroup'] == true;
+      
+      _triggerReaction(emoji, senderName: isGroup ? senderName : null);
+      
+      if (hapticEnabled) { try { HapticFeedback.lightImpact(); } catch (_) { /* ignore */ } }
+      
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Row(
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 20)), 
+            const SizedBox(width: 10), 
+            Text("$senderName ${_t('sent_react')}", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white))
+          ]
+        ), 
+        backgroundColor: Colors.pink.shade900, 
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2)
+      ));
+    };
+  }
+
+  void _handlePendingCallRequest(String callerId, String callerName) {
+    if (_isCallDialogOpen || _isHandlingPendingCall) {
+      return;
+    }
+    _isHandlingPendingCall = true;
+    try { NotificationService().cancelCallNotification(); } catch (_) { /* ignore */ }
+    Future.delayed(const Duration(milliseconds: 500), () {
+      _isHandlingPendingCall = false;
+      if (mounted && !_isCallDialogOpen) {
+         _vibrationTimer?.cancel();
+         _vibrationTimer = Timer.periodic(const Duration(seconds: 2), (timer) { if (hapticEnabled) { try { HapticFeedback.vibrate(); } catch (_) { /* ignore */ } } });
+         setState(() { _isIncomingCallActive = true; _pendingCallerId = callerId; _pendingCallerName = callerName; });
       }
     });
   }
 
-  void _onPersonSelected(int index) {
-    if (allContacts[index]['isEmpty'] == true) {
-       _openContacts(initialIndex: 1); 
-       return;
+  void _closeCallDialogSafely() {
+    if (_isCallDialogOpen) {
+      if (Navigator.of(context, rootNavigator: true).canPop()) { Navigator.of(context, rootNavigator: true).pop(); }
+      _isCallDialogOpen = false;
+    }
+  }
+
+  Future<void> _secureStarter() async {
+    await _loadLanguage(); 
+    if (mounted) {
+      _entranceController.forward();
+      if (hapticEnabled) { try { HapticFeedback.heavyImpact(); } catch (_) { /* ignore */ } }
+    }
+    await Future.delayed(const Duration(milliseconds: 1500));
+    if (mounted) {
+      await _initializeData();
+      try { await NotificationService().checkForLaunchNotification(); } catch (_) { /* ignore */ }
+      if (_pendingCallerId != null) {
+        _handlePendingCallRequest(_pendingCallerId!, _pendingCallerName ?? _pendingCallerId!);
+      }
+    }
+  }
+
+  Future<void> _initializeData() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    String? rawPhonePref = prefs.getString('user_phone');
+    if (rawPhonePref != null && rawPhonePref.isNotEmpty) {
+      String normalized = rawPhonePref.replaceAll(RegExp(r'[^\d+]'), '');
+      if (normalized.startsWith('00')) {
+        normalized = '+${normalized.substring(2)}';
+      } else if (normalized.startsWith('0')) {
+        normalized = '${_getDeviceCountryCode()}${normalized.substring(1)}';
+      } else if (!normalized.startsWith('+')) {
+        normalized = '${_getDeviceCountryCode()}$normalized';
+      }
+      _currentUserPhone = normalized;
+    }
+    
+    _callRingtone = prefs.getString('call_ringtone') ?? "";
+    _ratchetEnabled = prefs.getBool('ratchet_enabled') ?? true; 
+    
+    if (_currentUserPhone != null && _currentUserPhone!.isNotEmpty) { 
+      SocketService().initConnection(_currentUserPhone!); 
+      _isSocketStarted = true; 
+    }
+    
+    _fetchUsersFromOurAPI();
+    _fetchPendingMessages();
+
+    Future.delayed(const Duration(seconds: 1), () async {
+      if (mounted) {
+        try { 
+          await ph.Permission.microphone.request().timeout(const Duration(seconds: 5)); 
+        } catch (e) { debugPrint("Mikrofon izni hatası: $e"); }
+        
+        try { 
+          await _syncLocalContacts().timeout(const Duration(seconds: 5)); 
+        } catch (e) { debugPrint("Rehber izni hatası: $e"); }
+      }
+    });
+  }
+
+  Future<void> _fetchUsersFromOurAPI() async {
+    if (!mounted) {
+      return;
+    }
+    try {
+      final response = await http.get(Uri.parse('http://192.168.1.7:3000/api/users'));
+      if (response.statusCode == 200) {
+        List<dynamic> users = jsonDecode(response.body);
+        List<Map<String, dynamic>> fetchedContacts = [];
+        for (var u in users) {
+          String phone = u['phone']?.toString().replaceAll(RegExp(r'[^\d+]'), '') ?? "";
+          if (_currentUserPhone != null && phone == _currentUserPhone) {
+            continue;
+          }
+          String contactName = _localContactsMap.containsKey(phone) ? _localContactsMap[phone]! : (u['name'] != null && u['name'] != "Gizli Ajan" ? u['name'] : phone);
+          UserStatus statusEnum = (math.Random().nextBool()) ? UserStatus.available : UserStatus.offline; 
+          fetchedContacts.add({"name": contactName, "isGroup": false, "status": statusEnum, "uid": u['_id'], "phone": phone});
+        }
+        var seenPhones = <String>{};
+        var uniqueContacts = <Map<String, dynamic>>[];
+        for (var c in fetchedContacts) {
+           if (!seenPhones.contains(c['phone'])) { 
+             seenPhones.add(c['phone']); 
+             uniqueContacts.add(c); 
+           }
+        }
+        fetchedContacts = uniqueContacts;
+        for (int i = fetchedContacts.length; i < 7; i++) { 
+          fetchedContacts.add({"name": "Davet Et", "isEmpty": true}); 
+        }
+        if (mounted) {
+          setState(() {
+            originalContacts = fetchedContacts;
+            if (isSearching) { 
+              _handleSearch(_searchController.text); 
+            } else { 
+              allContacts = List.from(originalContacts); 
+            }
+          });
+          _sortOrbitContactsByRecent(); 
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  Future<void> _fetchPendingMessages() async {
+    if (_currentUserPhone == null) {
+      return;
+    }
+    try {
+      final response = await http.get(Uri.parse('http://192.168.1.7:3000/api/messages/pending/$_currentUserPhone'));
+      if (response.statusCode == 200) {
+        List<dynamic> pendingMsgs = jsonDecode(response.body);
+        if (pendingMsgs.isEmpty) {
+          return;
+        }
+        for (var msg in pendingMsgs) {
+          String senderPhone = msg['senderPhone'];
+          String messageId = msg['messageId'];
+          String audioUrl = msg['tempFileUrl'] ?? "";
+          if (audioUrl.isEmpty) {
+            continue;
+          }
+          String timeStr = "";
+          if (msg['createdAt'] != null) {
+            DateTime createdAt = DateTime.parse(msg['createdAt']).toLocal();
+            timeStr = "${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}";
+          } else {
+            final now = DateTime.now();
+            timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
+          }
+          final directory = await getTemporaryDirectory();
+          final filePath = '${directory.path}/orbit_pending_$messageId.m4a';
+          File file = File(filePath);
+          if (!file.existsSync()) {
+             final fileResponse = await http.get(Uri.parse(audioUrl));
+             await file.writeAsBytes(fileResponse.bodyBytes);
+          }
+          String displayName = _localContactsMap[senderPhone] ?? senderPhone;
+          String messageContactName = senderPhone;
+          int idx = allContacts.indexWhere((c) => c['phone'] == senderPhone && c['isGroup'] != true);
+          if (idx == -1) {
+             int emptyIdx = allContacts.lastIndexWhere((c) => c['isEmpty'] == true);
+             if (emptyIdx != -1) {
+               allContacts[emptyIdx] = {"name": displayName, "phone": senderPhone, "isGroup": false, "status": UserStatus.offline}; 
+             }
+          }
+          final newMsg = AudioMessage(id: messageId, contactName: messageContactName, senderName: displayName, isMe: false, durationInSeconds: 0, time: timeStr, isRead: false, isLiveMessage: false, audioFilePath: filePath);
+          if (mounted) {
+            setState(() { 
+              if (!_allMessages.any((m) => m.id == messageId)) {
+                _allMessages.insert(0, newMsg); 
+              }
+            });
+          }
+        }
+        if (mounted) {
+           _sortOrbitContactsByRecent(); 
+           if (hapticEnabled) { try { HapticFeedback.heavyImpact(); } catch (_) { /* ignore */ } }
+           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("📦 ${pendingMsgs.length} yeni mesaj indirildi."), backgroundColor: Colors.green.shade800));
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  String _getDeviceCountryCode() {
+    try {
+      String localeName = Platform.localeName.replaceAll('-', '_');
+      if (localeName.contains('_')) {
+        String countryIso = localeName.split('_').last.toUpperCase();
+        switch (countryIso) {
+          case 'US': case 'CA': return '+1'; case 'GB': return '+44'; case 'DE': return '+49';
+          case 'FR': return '+33'; case 'IT': return '+39'; case 'ES': return '+34';
+          case 'NL': return '+31'; case 'RU': case 'KZ': return '+7'; case 'AZ': return '+994';
+          default: return '+90';
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    return '+90';
+  }
+
+  Future<void> _syncLocalContacts() async {
+    final status = await ph.Permission.contacts.status;
+    if (status.isGranted) {
+      final contacts = await FlutterContacts.getAll(properties: {ContactProperty.name, ContactProperty.phone});
+      Map<String, String> tempMap = {};
+      String defaultCountryCode = _getDeviceCountryCode();
+      for (var c in contacts) {
+        if (c.phones.isNotEmpty) {
+          String rawPhone = c.phones.first.number;
+          String normalized = rawPhone.replaceAll(RegExp(r'[^\d+]'), '');
+          
+          if (normalized.startsWith('00')) {
+            normalized = '+${normalized.substring(2)}';
+          } else if (normalized.startsWith('0')) {
+            normalized = '$defaultCountryCode${normalized.substring(1)}';
+          } else if (!normalized.startsWith('+')) {
+            normalized = '$defaultCountryCode$normalized';
+          }
+          
+          final dName = c.displayName;
+          String name = (dName != null && dName.isNotEmpty) ? dName : _t('unknown');
+          tempMap[normalized] = name;
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _localContactsMap = tempMap;
+          for (var contact in originalContacts) {
+            if (contact['isEmpty'] != true && _localContactsMap.containsKey(contact['phone'])) {
+              contact['name'] = _localContactsMap[contact['phone']];
+            }
+          }
+          allContacts = List.from(originalContacts);
+        });
+      }
+    }
+  }
+
+  String _getInitials(String name) {
+    if (name.trim().isEmpty) {
+      return "";
+    }
+    List<String> parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts[0].isEmpty) {
+      return "";
+    }
+    if (parts.length == 1) {
+      return parts[0].substring(0, 2).toUpperCase();
+    }
+    return "${parts[0][0]}.${parts.last[0]}".toUpperCase();
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose(); 
+    _breatheController.dispose(); 
+    _entranceController.dispose(); 
+    _vibrationTimer?.cancel(); 
+    _historyPlayer.dispose(); 
+    _audioRecorder.dispose(); 
+    _searchController.dispose(); 
+    _hapticAcceptPulseController.dispose(); 
+    _hapticRejectPulseController.dispose(); 
+    _hapticTerminatePulseController.dispose(); 
+    _notificationDebounceTimer?.cancel(); 
+    _activeMenuScrollController.dispose(); 
+    _mainMenuScrollController.dispose(); 
+    WidgetsBinding.instance.removeObserver(this);
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown, DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    _appState = state;
+    if (state == AppLifecycleState.resumed) {
+      try { 
+        if (_isSocketStarted && SocketService().socket.disconnected) {
+          SocketService().socket.connect(); 
+        }
+      } catch (_) { /* ignore */ }
+      
+      if (_pendingCallerId != null) {
+        _handlePendingCallRequest(_pendingCallerId!, _pendingCallerName ?? _pendingCallerId!);
+      }
+      if (_activeLiveContacts.isNotEmpty) {
+        if (!_pulseController.isAnimating) {
+          _pulseController.repeat();
+        }
+        if (!_breatheController.isAnimating) {
+          _breatheController.repeat(reverse: true);
+        }
+      }
+      _fetchPendingMessages();
+    }
+  }
+
+  Future<String?> _pickImage(ImageSource source, {bool isBackground = false}) async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(source: source);
+      if (image != null) {
+        setState(() { 
+          if (isBackground) {
+            _customBackgroundImagePath = image.path; 
+          } else {
+            _userAvatarPath = image.path; 
+          }
+        });
+        return image.path;
+      }
+    } catch (e) { 
+      // ignore
+    }
+    return null;
+  }
+
+  void _removeAvatar() { 
+    setState(() { _userAvatarPath = null; }); 
+  }
+  
+  void _startDeletionCountdown(AudioMessage msg) {
+    if (msg.isPendingDeletion || selfDestructSeconds == -1) {
+      return;
+    }
+    if (selfDestructSeconds == 0) { 
+      setState(() => msg.isDeleted = true); 
+      return; 
+    }
+    setState(() { 
+      msg.isPendingDeletion = true; 
+      msg.deletionSecondsRemaining = selfDestructSeconds; 
+    });
+    Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || msg.isSaved || msg.isDeleted) {
+        timer.cancel();
+        if (mounted && msg.isSaved) {
+          setState(() => msg.isPendingDeletion = false);
+        }
+        return;
+      }
+      setState(() => msg.deletionSecondsRemaining--);
+      if (msg.deletionSecondsRemaining <= 0) {
+        timer.cancel();
+        setState(() { msg.isDeleted = true; msg.isPendingDeletion = false; });
+      }
+    });
+  }
+
+  Future<void> _playMessage(AudioMessage msg) async {
+    if (msg.isPlaying) {
+      await _historyPlayer.stop();
+      final session = await AudioSession.instance;
+      session.setActive(false).catchError((_) => false); 
+      setState(() { msg.isPlaying = false; _isCurrentlyPlayingOrRecording = false; _currentlyPlayingMessage = null; });
+      return;
+    }
+    if (_isCurrentlyPlayingOrRecording || _isProcessingLiveQueue) {
+      return; 
+    }
+    
+    if (msg.audioFilePath == null || !File(msg.audioFilePath!).existsSync()) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("⚠️ Audio file not found"), backgroundColor: Colors.orange));
+      }
+      return;
     }
     setState(() {
+      _isCurrentlyPlayingOrRecording = true; msg.isPlaying = true; _currentlyPlayingMessage = msg;
+      if (!msg.isMe && !msg.isRead) {
+         msg.isRead = true; 
+         final now = DateTime.now();
+         msg.readTime = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
+         SocketService().sendAudioRead(msg.contactName, msg.id, false, _userName);
+      }
+    });
+    try {
+      await _historyPlayer.stop();
+      final session = await AudioSession.instance;
+      await session.setActive(true);
+      await _historyPlayer.setVolume(1.0);
+      await _historyPlayer.setPlaybackRate(msg.playbackSpeed);
+      await _historyPlayer.setSource(DeviceFileSource(msg.audioFilePath!));
+      if (msg.playProgress > 0.0 && msg.playProgress < 1.0) {
+          int seekMs = (msg.durationInSeconds * 1000 * msg.playProgress).round();
+          await _historyPlayer.seek(Duration(milliseconds: seekMs));
+      }
+      await _historyPlayer.resume();
+    } catch (e) {
+      await _historyPlayer.stop();
+      final session = await AudioSession.instance;
+      session.setActive(false).catchError((_) => false); 
+      setState(() { msg.isPlaying = false; _isCurrentlyPlayingOrRecording = false; _currentlyPlayingMessage = null; }); 
+    }
+  }
+
+  void _startRecording({bool isChunkContinue = false}) {
+    if ((isRecording && !isChunkContinue) || activeIndex == -1 || allContacts[activeIndex]['isEmpty'] == true) {
+      return;
+    }
+    if (hapticEnabled && !isChunkContinue) { 
+      try { HapticFeedback.mediumImpact(); } catch (_) { /* ignore */ } 
+    }
+    _recordTimer?.cancel(); _amplitudeTimer?.cancel(); _micDebounceTimer?.cancel();
+
+    if (!isChunkContinue) {
+      setState(() { isRecording = true; _isCurrentlyPlayingOrRecording = true; _recordDuration = 0; _dragOffset = 0.0; _dragVerticalOffset = 0.0; _isCancelled = false; });
+      if (_activeLiveContacts.isNotEmpty) {
+         for (var target in _activeLiveContacts) {
+           SocketService().sendSpeakingState(target, true);
+         }
+      }
+    } else {
+      setState(() => _recordDuration = 0); 
+    }
+    
+    bool isGroup = allContacts[activeIndex]['isGroup'] == true;
+    if (isGroup) {
+      List<dynamic> members = allContacts[activeIndex]['members'] ?? [];
+      for (var m in members) { 
+        if (_activeLiveContacts.contains(m)) {
+          _resetLiveTimeoutForContact(m.toString()); 
+        }
+      }
+    } else {
+      String currentTargetPhone = allContacts[activeIndex]['phone'];
+      if (_activeLiveContacts.contains(currentTargetPhone)) {
+        _resetLiveTimeoutForContact(currentTargetPhone);
+      }
+    }
+    
+    _micDebounceTimer = Timer(const Duration(milliseconds: 10), () async {
+       try {
+         if (await _audioRecorder.hasPermission()) {
+           if (await _audioRecorder.isRecording()) {
+             await _audioRecorder.stop();
+           }
+           if (_currentlyPlayingMessage != null && !_isProcessingLiveQueue) { 
+              await _historyPlayer.stop();
+              final session = await AudioSession.instance;
+              session.setActive(false).catchError((_) => false); 
+              setState(() { _currentlyPlayingMessage!.isPlaying = false; _currentlyPlayingMessage = null; _isCurrentlyPlayingOrRecording = false; });
+           }
+           await SocketService().stopAudio();
+           final Directory tempDir = await getTemporaryDirectory();
+           final String tempPath = '${tempDir.path}/my_orbit_record_${DateTime.now().millisecondsSinceEpoch}.m4a';
+           await _audioRecorder.start(const RecordConfig(encoder: AudioEncoder.aacLc, sampleRate: 44100, bitRate: 64000, numChannels: 1), path: tempPath);
+           _recordingStartTime = DateTime.now();
+           if (!mounted) {
+             return;
+           }
+           
+           _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 80), (timer) async {
+             try {
+               if (isRecording && await _audioRecorder.isRecording()) {
+                  final amplitude = await _audioRecorder.getAmplitude();
+                  double normalized = (amplitude.current + 60) / 60;
+                  if (mounted) {
+                    setState(() => _audioLevel.value = normalized.clamp(0.0, 1.0));
+                  }
+               }
+             } catch (_) { /* ignore */ }
+           });
+           
+           _recordTimer = Timer.periodic(const Duration(seconds: 1), (timer) { 
+             if (mounted) {
+               setState(() => _recordDuration++); 
+               if (_recordDuration >= 60) {
+                 _stopRecording(isChunk: true);
+               }
+             }
+           });
+         }
+       } catch (e) {
+         if (mounted) { 
+           setState(() { isRecording = false; _isCurrentlyPlayingOrRecording = false; }); 
+         }
+       }
+    });
+  }
+
+  Future<void> _stopRecording({bool isChunk = false}) async {
+    if (!isRecording && !isChunk) {
+      return;
+    }
+    _micDebounceTimer?.cancel(); _amplitudeTimer?.cancel(); _recordTimer?.cancel();
+    
+    if (!isChunk) {
+      setState(() { isRecording = false; _audioLevel.value = 0.0; });
+      if (_activeLiveContacts.isNotEmpty) {
+         for (var target in _activeLiveContacts) {
+           SocketService().sendSpeakingState(target, false);
+         }
+      }
+    }
+    
+    String? path;
+    try {
+      if (await _audioRecorder.isRecording()) {
+          if (_recordingStartTime != null) {
+            final int elapsed = DateTime.now().difference(_recordingStartTime!).inMilliseconds;
+            if (elapsed < 600) {
+              await Future.delayed(Duration(milliseconds: 600 - elapsed));
+            }
+          }
+          path = await _audioRecorder.stop();
+      }
+    } catch (_) { /* ignore */ }
+    
+    setState(() { _isCurrentlyPlayingOrRecording = _isProcessingLiveQueue; }); 
+    
+    if (_isCancelled && !isChunk) {
+      if (hapticEnabled) { try { HapticFeedback.heavyImpact(); } catch (_) { /* ignore */ } }
+    } else if (path != null) {
+      final audioFile = File(path);
+      if (audioFile.existsSync() && audioFile.lengthSync() > 100) {
+          if (hapticEnabled && !isChunk) { try { HapticFeedback.lightImpact(); } catch (_) { /* ignore */ } }
+          final now = DateTime.now();
+          String timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
+          bool isGroup = allContacts[activeIndex]['isGroup'] == true;
+          String contactIdentifier = isGroup ? allContacts[activeIndex]['name'] : allContacts[activeIndex]['phone'];
+
+          final newMsg = AudioMessage(
+            id: DateTime.now().millisecondsSinceEpoch.toString() + (isChunk ? "_chunk" : ""), 
+            contactName: contactIdentifier, isMe: true, durationInSeconds: _recordDuration, time: timeStr,
+            isRead: _activeLiveContacts.isNotEmpty, isLiveMessage: _activeLiveContacts.isNotEmpty, repliedToMessageId: _replyingToMessage?.id, audioFilePath: path,
+            voiceEffect: _selectedVoiceEffect, 
+          );
+          
+          setState(() { _allMessages.insert(0, newMsg); _sortOrbitContactsByRecent(); });
+          
+          try {
+            var uri = Uri.parse('http://192.168.1.7:3000/api/upload');
+            var request = http.MultipartRequest('POST', uri);
+            request.files.add(await http.MultipartFile.fromPath('audio', audioFile.path));
+            request.fields['voiceEffect'] = _selectedVoiceEffect; 
+            
+            var response = await request.send();
+            if (response.statusCode == 200) {
+               var responseData = await response.stream.bytesToString();
+               var jsonResponse = jsonDecode(responseData);
+               String audioUrl = jsonResponse['fileUrl']; 
+               
+               if (_activeLiveContacts.isNotEmpty) {
+                  for(var target in _activeLiveContacts) { 
+                    SocketService().sendAudio(target, audioUrl, newMsg.id); 
+                    _resetLiveTimeoutForContact(target); 
+                  }
+               } else if (!isGroup) {
+                  SocketService().sendAudio(allContacts[activeIndex]['phone'], audioUrl, newMsg.id);
+               }
+            }
+          } catch (e) { /* ignore */ }
+      }
+    }
+    
+    if (isChunk && isRecording) {
+       _startRecording(isChunkContinue: true);
+    } else {
+       setState(() { _dragOffset = 0.0; _dragVerticalOffset = 0.0; _isCancelled = false; _replyingToMessage = null; });
+    }
+  }
+  
+  void _updateRecordingPointer(PointerMoveEvent event) {
+    if (!isRecording) {
+      return;
+    }
+    bool isLive = _activeLiveContacts.isNotEmpty;
+    setState(() {
+      double moveDelta = event.localDelta.dx;
+      if (_isLeftHanded) {
+        _dragOffset += moveDelta; _dragOffset = _dragOffset.clamp(0.0, 150.0); 
+      } else {
+        _dragOffset += moveDelta; _dragOffset = _dragOffset.clamp(-150.0, 0.0); 
+      }
+
+      if (isLive && event.localDelta.dy > 0) {
+        _dragVerticalOffset += event.localDelta.dy;
+      }
+
+      if (isLive && _dragVerticalOffset > 130 && !_isCancelled) { 
+        _isCancelled = true; 
+        _endLiveConnection();
+        if (hapticEnabled) { try { HapticFeedback.heavyImpact(); } catch (_) { /* ignore */ } }
+      } 
+      else if ((_isLeftHanded && _dragOffset > 100) || (!_isLeftHanded && _dragOffset < -100)) {
+        _isCancelled = true;
+      }
+    });
+  }
+
+  void _endLiveConnection() {
+    if (activeIndex != -1) {
+      bool isGroup = allContacts[activeIndex]['isGroup'] == true;
+      String contactName = allContacts[activeIndex]['name'];
+      if (isGroup) {
+         List<dynamic> members = allContacts[activeIndex]['members'] ?? [];
+         for (var m in members) {
+           String phone = m.toString();
+           if (_activeLiveContacts.contains(phone)) { 
+             SocketService().rejectCall(phone); 
+             _activeLiveContacts.remove(phone); 
+             _liveTimers[phone]?.cancel(); 
+             _liveTimers.remove(phone); 
+           }
+         }
+         _activeLiveGroupMembers.clear(); 
+      } else {
+         String contactPhone = allContacts[activeIndex]['phone'];
+         if (_activeLiveContacts.contains(contactPhone)) { 
+           SocketService().rejectCall(contactPhone); 
+           _activeLiveContacts.remove(contactPhone); 
+           _liveTimers[contactPhone]?.cancel(); 
+           _liveTimers.remove(contactPhone); 
+         }
+      }
+
+      setState(() { 
+        if (_activeLiveContacts.isEmpty) { 
+          _liveDurationTimer?.cancel(); 
+          _liveDuration = 0; 
+        } 
+      });
+      if (hapticEnabled) { 
+        try { HapticFeedback.heavyImpact(); } catch (_) { /* ignore */ } 
+      }
+      if (mounted) { 
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Row(children: [const Icon(Icons.phone_disabled, color: Colors.white, size: 18), const SizedBox(width: 8), Text("$contactName ${_t('disconnected')}")]), backgroundColor: Colors.red.shade800, duration: const Duration(seconds: 2))); 
+      }
+    }
+  }
+
+  void _requestLiveConnection(int index) {
+    try {
+      String name = allContacts[index]['name'] ?? _t('unknown');
+      bool isGroup = allContacts[index]['isGroup'] == true;
+
+      if (isGroup) {
+         List<dynamic> members = allContacts[index]['members'] ?? [];
+         if (members.isEmpty) {
+           return;
+         }
+         for (var m in members) { 
+           SocketService().startCall(m.toString()); 
+         }
+      } else {
+         String phone = allContacts[index]['phone'] ?? "";
+         if (phone.isEmpty) {
+           return; 
+         }
+         if (allContacts[index]['status'] == UserStatus.busy) { 
+           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$name ${_t('is_busy')}"), backgroundColor: Colors.orange)); 
+           return; 
+         }
+         SocketService().startCall(phone);
+      }
+
+      setState(() { activeIndex = index; isWaitingForLiveApproval = true; _replyingToMessage = null; });
+      _triggerConnectionArrows();
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Row(children: [const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.cyanAccent, strokeWidth: 2)), const SizedBox(width: 12), Text("$name ${_t('calling')}", style: const TextStyle(color: Colors.white))]), backgroundColor: Colors.black87, duration: const Duration(seconds: 30)));
+
+      _outgoingCallTimer?.cancel();
+      _outgoingCallTimer = Timer(const Duration(seconds: 30), () {
+        if (mounted && isWaitingForLiveApproval) {
+          if (isGroup) {
+             List<dynamic> members = allContacts[index]['members'] ?? [];
+             for (var m in members) { SocketService().cancelCall(m.toString()); }
+          } else { 
+            SocketService().cancelCall(allContacts[index]['phone']); 
+          }
+          setState(() { isWaitingForLiveApproval = false; });
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('call_not_ans')), backgroundColor: Colors.red.shade800));
+        }
+      });
+    } catch (e) { 
+      // ignore
+    }
+  }
+
+  void _cancelOutgoingCall() {
+    if (activeIndex != -1 && isWaitingForLiveApproval) {
+      bool isGroup = allContacts[activeIndex]['isGroup'] == true;
+      if (isGroup) {
+        List<dynamic> members = allContacts[activeIndex]['members'] ?? [];
+        for (var m in members) { SocketService().cancelCall(m.toString()); }
+      } else {
+        String phone = allContacts[activeIndex]['phone'];
+        SocketService().cancelCall(phone);
+      }
+      _outgoingCallTimer?.cancel();
+      setState(() { isWaitingForLiveApproval = false; });
+      if (hapticEnabled) { try { HapticFeedback.heavyImpact(); } catch (_) { /* ignore */ } }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('call_canc')), backgroundColor: Colors.orange, duration: const Duration(seconds: 2)));
+    }
+  }
+
+  void _onPersonSelected(int index) {
+    if (allContacts[index]['isEmpty'] == true) { 
+      if (!_isArchiveMode) {
+        _openContacts(initialIndex: index); 
+      }
+      return; 
+    }
+    setState(() { 
       activeIndex = index; 
       _replyingToMessage = null; 
+      _isActiveMenuExpanded = false;
       _closeSearchMode(); 
     });
     _triggerConnectionArrows();
@@ -967,1621 +1623,1093 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   void _handleSearch(String query) {
     setState(() {
       isSearching = query.isNotEmpty;
-      
-      if (query.isEmpty) {
-        allContacts = List.from(originalContacts);
+      if (query.isEmpty) { 
+        allContacts = List.from(originalContacts); 
       } else {
-        List<Map<String, dynamic>> matched = [];
-        List<Map<String, dynamic>> unmatched = [];
-        
+        List<Map<String, dynamic>> matched = []; List<Map<String, dynamic>> unmatched = [];
         for (var contact in originalContacts) {
-          if (contact['name'] != "Davet Et" && contact['name'].toLowerCase().contains(query.toLowerCase())) {
-            matched.add(contact);
-          } else {
-            unmatched.add(contact);
+          if (contact['name'] != "Davet Et" && contact['name'].toLowerCase().contains(query.toLowerCase())) { 
+            matched.add(contact); 
+          } else { 
+            unmatched.add(contact); 
           }
         }
-        
         allContacts = [...matched, ...unmatched];
-        
-        if (matched.isNotEmpty) {
-          activeIndex = 0;
-          _scrollOffset = 0.0; 
-        }
+        if (matched.isNotEmpty) { activeIndex = 0; _scrollOffset = 0.0; }
       }
     });
   }
 
   void _closeSearchMode() {
-    if (showSearchField) {
-      setState(() {
-        isSearching = false;
-        showSearchField = false;
-        _searchController.clear();
+    if (showSearchField) { 
+      setState(() { 
+        isSearching = false; 
+        showSearchField = false; 
+        _isActiveMenuExpanded = false;
+        _searchController.clear(); 
         _focusNode.unfocus(); 
         allContacts = List.from(originalContacts); 
-      });
+      }); 
     }
   }
 
   void _onSearchedPersonSelected(Map<String, dynamic> person) {
+    setState(() { originalContacts.remove(person); originalContacts.insert(0, person); allContacts = List.from(originalContacts); _onPersonSelected(0); _scrollOffset = 0.0; });
+  }
+
+  void _toggleArchiveMode() {
+    if (hapticEnabled) { 
+      try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ } 
+    }
     setState(() {
-      originalContacts.remove(person);
-      originalContacts.insert(0, person);
-      allContacts = List.from(originalContacts);
-      
-      _onPersonSelected(0);
-      _scrollOffset = 0.0; 
+      if (_isArchiveMode) {
+        _isArchiveMode = false;
+        allContacts = List.from(originalContacts);
+        activeIndex = -1;
+      } else {
+        _isArchiveMode = true;
+        activeIndex = -1;
+        
+        var savedMsgs = _allMessages.where((m) => m.isSaved && !m.isDeleted).toList();
+        savedMsgs.sort((a, b) {
+          int timeA = int.tryParse(a.id.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+          int timeB = int.tryParse(b.id.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+          return timeB.compareTo(timeA);
+        });
+        
+        List<String> uniqueNames = [];
+        for (var m in savedMsgs) {
+           if (!uniqueNames.contains(m.contactName)) {
+             uniqueNames.add(m.contactName);
+           }
+        }
+        
+        List<Map<String, dynamic>> archiveContacts = [];
+        for (var name in uniqueNames) {
+          var originalContact = originalContacts.firstWhere(
+            (c) => c['name'] == name || c['phone'] == name, 
+            orElse: () => {"name": name, "phone": name, "isGroup": false, "status": UserStatus.offline}
+          );
+          archiveContacts.add(originalContact);
+        }
+        
+        while(archiveContacts.length < 7) {
+          archiveContacts.add({"name": "Davet Et", "isEmpty": true});
+        }
+        allContacts = archiveContacts;
+      }
+      _isMenuExpanded = false;
+      _isActiveMenuExpanded = false;
     });
   }
 
-  String formatName(String fullName) {
-    if (fullName == "Davet Et") return fullName;
-    List<String> parts = fullName.trim().split(' ');
-    if (fullName.length <= 10) return fullName;
-    if (parts.length > 1) return "${parts[0]} ${parts[parts.length - 1][0]}.";
-    return fullName.substring(0, 10);
-  }
-
- String getInitials(String name) {
-    if (name == "Davet Et") return "";
-    List<String> parts = name.trim().split(' ');
-    if (parts.length == 1) return parts[0].substring(0, 1).toUpperCase();
-    return "${parts[0][0]}.${parts[parts.length - 1][0]}".toUpperCase();
-  }
-
-  Color _getStatusColor(UserStatus s) {
-    switch(s) {
-      case UserStatus.available: return Colors.greenAccent;
-      case UserStatus.busy: return Colors.redAccent;
-      case UserStatus.away: return Colors.orangeAccent;
+  Future<void> _openContacts({int initialIndex = 0}) async {
+    final Map<String, dynamic>? selectedContact = await ContactsBottomSheet.show(context, initialIndex: 0);
+    if (selectedContact != null && mounted) {
+      setState(() {
+        if (allContacts[initialIndex]['isEmpty'] == true) { 
+          allContacts[initialIndex] = selectedContact; 
+          originalContacts[initialIndex] = selectedContact; 
+        } else {
+          int emptyIdx = allContacts.lastIndexWhere((c) => c['isEmpty'] == true);
+          if (emptyIdx != -1) { 
+            allContacts[emptyIdx] = selectedContact; 
+            originalContacts[emptyIdx] = selectedContact; 
+          }
+        }
+      });
     }
-  }
-
-  String _getStatusText(UserStatus s) {
-    switch(s) {
-      case UserStatus.available: return "Müsait";
-      case UserStatus.busy: return "Meşgul";
-      case UserStatus.away: return "Uzakta";
-    }
-  }
-
-  void _openSavedMessages() {
-    SavedMessagesSheet.show(
-      context: context,
-      savedMessages: _allMessages.where((msg) => msg.isSaved && !msg.isDeleted).toList(),
-      formatDuration: _formatDuration,
-      onUnsave: (msg) {
-        setState(() {
-          msg.isSaved = false;
-          msg.isDeleted = true;
-        });
-      },
-    );
-  }
-
-  void _openContacts({int initialIndex = 0}) {
-    ContactsBottomSheet.show(context, initialIndex: initialIndex);
   }
 
   void _openSettings() {
     setState(() => _isSettingsOpen = true);
     SettingsBottomSheet.show(
-      context: context,
-      userName: _userName,
-      userAvatarPath: _userAvatarPath,
-      customAvatarColor: _myCustomColor,
-      onCustomAvatarColorChanged: (val) => setState(() => _myCustomColor = val),
-      myStatus: _myStatus,
-      onUserNameChanged: (val) => setState(() => _userName = val),
-      onPickFromGallery: () => _pickImage(ImageSource.gallery),
-      onPickFromCamera: () => _pickImage(ImageSource.camera),
-      onRemoveAvatar: _removeAvatar,
-      onStatusChanged: (val) => setState(() => _myStatus = val),
-      isLeftHanded: _isLeftHanded,
-      onLeftHandedChanged: (val) => setState(() => _isLeftHanded = val),
-      selectedLiveAnimation: selectedLiveAnimation,
-      animationOptions: animationOptions,
-      onLiveAnimationChanged: (val) => setState(() => selectedLiveAnimation = val),
-      isBackgroundTransparent: isBackgroundTransparent,
-      onBackgroundTransparentChanged: (val) => setState(() => isBackgroundTransparent = val),
-      isCircularMessageStyle: isCircularMessageStyle,
-      onCircularMessageStyleChanged: (val) => setState(() => isCircularMessageStyle = val),
-      hapticEnabled: hapticEnabled,
-      onHapticChanged: (val) => setState(() => hapticEnabled = val),
-      useSpeaker: _useSpeaker,
-      onSpeakerChanged: (val) => setState(() => _useSpeaker = val),
-      selfDestructSeconds: selfDestructSeconds,
-      onSelfDestructChanged: (val) => setState(() => selfDestructSeconds = val),
-      liveAudioPermission: _liveAudioPermission,
-      onLivePermissionChanged: (val) => setState(() => _liveAudioPermission = val),
+      context: context, userName: _userName, userAvatarPath: _userAvatarPath, customAvatarColor: _myCustomColor, onCustomAvatarColorChanged: (val) => setState(() => _myCustomColor = val), myStatus: _myStatus,
+      onUserNameChanged: (val) { setState(() => _userName = val); }, onPickFromGallery: () => _pickImage(ImageSource.gallery), onPickFromCamera: () => _pickImage(ImageSource.camera), onRemoveAvatar: _removeAvatar, onStatusChanged: (val) { setState(() => _myStatus = val); },
+      isLeftHanded: _isLeftHanded, onLeftHandedChanged: (val) => setState(() => _isLeftHanded = val), selectedLiveAnimation: selectedLiveAnimation, animationOptions: animationOptions, onLiveAnimationChanged: (val) => setState(() => selectedLiveAnimation = val),
+      isBackgroundTransparent: isBackgroundTransparent, onBackgroundTransparentChanged: (val) => setState(() => isBackgroundTransparent = val), isCircularMessageStyle: isCircularMessageStyle, onCircularMessageStyleChanged: (val) => setState(() => isCircularMessageStyle = val),
+      hapticEnabled: hapticEnabled, onHapticChanged: (val) => setState(() => hapticEnabled = val), useSpeaker: _useSpeaker, onSpeakerChanged: (val) => setState(() => _useSpeaker = val),
       
-      // 🟢 Ayarlar ekranına bildirim State'lerini gönderiyoruz
-      notificationsEnabled: _notificationsEnabled,
-      onNotificationsChanged: (val) => setState(() => _notificationsEnabled = val),
-      messageNotificationsEnabled: _messageNotificationsEnabled,
-      onMessageNotificationsChanged: (val) => setState(() => _messageNotificationsEnabled = val),
-      callNotificationsEnabled: _callNotificationsEnabled,
-      onCallNotificationsChanged: (val) => setState(() => _callNotificationsEnabled = val),
-      
-      deleteFilterDays: deleteFilterDays,
-      onDeleteFilterDaysChanged: (val) => setState(() => deleteFilterDays = val),
-      onClearOldMessages: (days) {
-        final limitDate = DateTime.now().subtract(Duration(days: days));
-        setState(() {
-          _allMessages.removeWhere((m) => m.isSaved && m.createdAt.isBefore(limitDate));
-        });
+      ratchetEnabled: _ratchetEnabled, 
+      onRatchetChanged: (val) async { 
+        setState(() => _ratchetEnabled = val); 
+        final prefs = await SharedPreferences.getInstance(); 
+        prefs.setBool('ratchet_enabled', val); 
       },
-      customBackgroundImagePath: _customBackgroundImagePath,
-      onPickBackground: () => _pickImage(ImageSource.gallery, isBackground: true),
-      onRemoveBackground: () {
-        setState(() {
-          _customBackgroundImagePath = null;
-          isBackgroundTransparent = true;
-        });
-      },
-      onClosed: () => setState(() => _isSettingsOpen = false),
-    );
-  }
 
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _entranceController,
-      builder: (context, child) {
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final double screenWidth = constraints.maxWidth;
-            final double screenHeight = constraints.maxHeight;
-            double orbitRadius = 105.0; 
-            double menuX = screenWidth / 2; 
-            double menuY = screenHeight - 280.0;
-            double itemSpacingAngle = 0.25 * math.pi;
-            double maxScroll = (allContacts.length * itemSpacingAngle) - (4 * itemSpacingAngle);
-            if (maxScroll < 0) maxScroll = 0;
-
-            String activeContactName = activeIndex != -1 ? allContacts[activeIndex]['name'] : "";
-            bool isGroup = activeIndex != -1 ? (allContacts[activeIndex]['isGroup'] ?? false) : false;
-            bool anyLiveActive = _activeLiveContacts.isNotEmpty;
-
-            return GestureDetector(
-              onTap: () {
-                if (showSearchField) {
-                  _closeSearchMode();
-                } else {
-                  FocusScope.of(context).unfocus();
-                }
-              },
-              onVerticalDragUpdate: (details) {
-                if (!showSearchField) {
-                  setState(() {
-                    double delta = details.delta.dy * 0.005;
-                    _scrollOffset -= delta;
-                    if (_scrollOffset < -0.2) _scrollOffset = -0.2;
-                    if (_scrollOffset > maxScroll) _scrollOffset = maxScroll;
-                  });
-                }
-              },
-              child: Stack(
-                children: [
-                  if (_customBackgroundImagePath != null) Positioned.fill(child: Image.file(File(_customBackgroundImagePath!), fit: BoxFit.cover))
-                  else if (!isBackgroundTransparent) Container(color: Colors.black) 
-                  else Positioned.fill(child: Container(color: Colors.black)),
-
-                  if (_customBackgroundImagePath != null || isBackgroundTransparent)
-                    Positioned.fill(child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 12.0, sigmaY: 12.0), child: Container(color: Colors.black.withValues(alpha: 0.4)))),
-
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      ignoring: !(_isSettingsOpen || showSearchField), 
-                      child: TweenAnimationBuilder<double>(
-                        tween: Tween<double>(begin: 0.0, end: (_isSettingsOpen || showSearchField) ? 12.0 : 0.0), 
-                        duration: const Duration(milliseconds: 300),
-                        curve: Curves.easeOut,
-                        builder: (context, blurValue, child) {
-                          if (blurValue == 0.0) return const SizedBox.shrink(); 
-                          return BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: blurValue, sigmaY: blurValue),
-                            child: Container(color: Colors.black.withValues(alpha: (blurValue / 12.0) * (showSearchField ? 0.6 : 0.4))),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-
-                  Scaffold(
-                    backgroundColor: Colors.transparent, 
-                    resizeToAvoidBottomInset: false, 
-
-                    body: Stack(
-                      children: [
-                        if (_currentlyPlayingQueueItemSender != null && !showSearchField)
-                          Positioned(
-                            top: 100, left: 20, right: 20,
-                            child: Center(
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 300),
-                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                                decoration: BoxDecoration(
-                                  color: Colors.cyanAccent.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(30),
-                                  border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.8), width: 1.5),
-                                  boxShadow: [BoxShadow(color: Colors.cyanAccent.withValues(alpha: 0.2), blurRadius: 15)]
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.volume_up, color: Colors.cyanAccent, size: 18), const SizedBox(width: 8),
-                                    Text("$_currentlyPlayingQueueItemSender dinleniyor...", style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                      
-                        if (activeIndex != -1 && !showSearchField && allContacts[activeIndex]['isEmpty'] != true) 
-                          Positioned(
-                            top: 50, left: 0, right: 0,
-                            child: Column(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(color: _activeLiveContacts.contains(activeContactName) ? Colors.greenAccent : Colors.white12, width: _activeLiveContacts.contains(activeContactName) ? 1.0 : 0.5),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(isGroup ? Icons.groups : Icons.person, size: 12, color: _activeLiveContacts.contains(activeContactName) ? Colors.greenAccent : Colors.cyanAccent),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        _activeLiveContacts.contains(activeContactName) ? "$activeContactName (Canlı)" : activeContactName,
-                                        style: TextStyle(color: _activeLiveContacts.contains(activeContactName) ? Colors.greenAccent : Colors.white70, fontSize: 12, fontWeight: FontWeight.w500, letterSpacing: 0.5),
-                                      ),
-                                      if (_mutedContacts.contains(activeContactName)) ...[
-                                        const SizedBox(width: 8),
-                                        const Icon(Icons.notifications_off, color: Colors.orangeAccent, size: 12),
-                                      ],
-                                      if (!isGroup && !_activeLiveContacts.contains(activeContactName)) ...[
-                                        const SizedBox(width: 10),
-                                        Icon(Icons.circle, color: _getStatusColor(allContacts[activeIndex]['status']), size: 8), const SizedBox(width: 4),
-                                        Text(_getStatusText(allContacts[activeIndex]['status']), style: const TextStyle(fontSize: 10, color: Colors.white70)),
-                                      ],
-                                      
-                                      if (!isGroup) ...[
-                                        const SizedBox(width: 4),
-                                        Theme(
-                                          data: Theme.of(context).copyWith(
-                                            splashColor: Colors.transparent,
-                                            highlightColor: Colors.transparent,
-                                          ),
-                                          child: PopupMenuButton<String>(
-                                            padding: EdgeInsets.zero,
-                                            icon: const Icon(Icons.more_vert, color: Colors.white54, size: 16),
-                                            color: Colors.grey.shade900.withValues(alpha: 0.95),
-                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.cyanAccent.withValues(alpha: 0.3))),
-                                            offset: const Offset(0, 30),
-                                            onSelected: (value) {
-                                              if (value == 'mute') {
-                                                setState(() {
-                                                  _mutedContacts.contains(activeContactName) ? _mutedContacts.remove(activeContactName) : _mutedContacts.add(activeContactName);
-                                                });
-                                              } else if (value == 'block') {
-                                                setState(() {
-                                                  if (_blockedContacts.contains(activeContactName)) {
-                                                    _blockedContacts.remove(activeContactName);
-                                                  } else {
-                                                    _blockedContacts.add(activeContactName);
-                                                    if (_activeLiveContacts.contains(activeContactName)) _endLiveConnection();
-                                                  }
-                                                });
-                                              }
-                                            },
-                                            itemBuilder: (BuildContext context) {
-                                              bool isMuted = _mutedContacts.contains(activeContactName);
-                                              bool isBlocked = _blockedContacts.contains(activeContactName);
-                                              return [
-                                                PopupMenuItem(
-                                                  value: 'mute',
-                                                  child: Row(
-                                                    children: [
-                                                      Icon(isMuted ? Icons.notifications_active : Icons.notifications_off, color: Colors.orangeAccent, size: 16),
-                                                      const SizedBox(width: 8),
-                                                      Text(isMuted ? "Sesi Aç" : "Sessize Al", style: const TextStyle(color: Colors.white, fontSize: 12)),
-                                                    ],
-                                                  ),
-                                                ),
-                                                PopupMenuItem(
-                                                  value: 'block',
-                                                  child: Row(
-                                                    children: [
-                                                      Icon(isBlocked ? Icons.check_circle : Icons.block, color: Colors.redAccent, size: 16),
-                                                      const SizedBox(width: 8),
-                                                      Text(isBlocked ? "Engeli Kaldır" : "Kişiyi Engelle", style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ];
-                                            },
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                if (isGroup && _activeLiveContacts.contains(activeContactName) && _activeLiveGroupMembers.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 8.0),
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: _activeLiveGroupMembers.map((member) => Container(
-                                        margin: const EdgeInsets.symmetric(horizontal: 4), padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(color: Colors.greenAccent.withValues(alpha: 0.1), border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.5), width: 0.5), borderRadius: BorderRadius.circular(10)),
-                                        child: Row(children: [const Icon(Icons.circle, color: Colors.greenAccent, size: 6), const SizedBox(width: 4), Text(member, style: const TextStyle(fontSize: 9, color: Colors.greenAccent))]),
-                                      )).toList(),
-                                    ),
-                                  )
-                              ],
-                            ),
-                          ),
-
-                        if (activeIndex != -1 && !showSearchField && allContacts[activeIndex]['isEmpty'] != true) 
-                          Positioned(
-                            top: (isGroup && _activeLiveContacts.contains(activeContactName)) ? 110 : 90, left: 10, right: 10, bottom: screenHeight - menuY + 130, 
-                            child: ShaderMask(
-                              shaderCallback: (Rect bounds) {
-                                return const LinearGradient(
-                                  begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                                  colors: [Colors.transparent, Colors.white, Colors.white, Colors.transparent], stops: [0.0, 0.15, 0.85, 1.0], 
-                                ).createShader(bounds);
-                              },
-                              blendMode: BlendMode.dstIn,
-                              child: _buildChatArea(),
-                            ),
-                          ),
-
-                        ...List.generate(allContacts.length, (index) {
-                          double startAngle = -0.35 * math.pi; 
-                          double angle = startAngle - (index * itemSpacingAngle) + _scrollOffset;
-                          double xOffset = orbitRadius * math.cos(angle);
-                          double yOffset = orbitRadius * math.sin(angle);
-                          if (_isLeftHanded) xOffset = -xOffset; 
-                          double globalAngle = math.atan2(yOffset, xOffset);
-
-                          return _buildOrbitalItem(
-                            index: index,
-                            centerX: menuX,
-                            centerY: menuY,
-                            radius: orbitRadius, 
-                            spacing: itemSpacingAngle,
-                            data: allContacts[index],
-                            globalAngle: globalAngle, 
-                          );
-                        }).reversed, 
-
-                        OrbitMenuGrid(
-                          isLeftHanded: _isLeftHanded,
-                          showSearchField: showSearchField,
-                          menuX: menuX, menuY: menuY, orbitRadius: orbitRadius, screenWidth: screenWidth,
-                          onToggleHand: () { },
-                          onSearchTap: () {
-                            setState(() {
-                              showSearchField = !showSearchField;
-                              if (!showSearchField) { _closeSearchMode(); } 
-                              else { 
-                                Future.delayed(const Duration(milliseconds: 150), () { 
-                                  if (context.mounted) {
-                                    FocusScope.of(context).requestFocus(_focusNode); 
-                                  }
-                                }); 
-                              }
-                            });
-                          },
-                          onBookmarkTap: _openSavedMessages,
-                          onSettingsTap: _openSettings,
-                          onContactAddTap: _openContacts,
-                        ),
-
-                        AnimatedPositioned(
-                          duration: const Duration(milliseconds: 300),
-                          curve: Curves.easeOutCubic,
-                          right: !_isLeftHanded ? 30.0 : null, 
-                          left: _isLeftHanded ? 30.0 : null, 
-                          top: menuY - 240, 
-                          child: AnimatedOpacity(
-                            duration: const Duration(milliseconds: 300),
-                            opacity: (showSearchField || activeIndex == -1 || !_activeLiveContacts.contains(activeContactName)) ? 0.0 : 1.0, 
-                            child: IgnorePointer(
-                              ignoring: showSearchField || activeIndex == -1 || !_activeLiveContacts.contains(activeContactName), 
-                              child: GestureDetector(
-                                onTap: _endLiveConnection, 
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.redAccent.withValues(alpha: 0.15), 
-                                    borderRadius: BorderRadius.circular(20), 
-                                    border: Border.all(color: Colors.redAccent.withValues(alpha: 0.6), width: 1.5),
-                                    boxShadow: [BoxShadow(color: Colors.redAccent.withValues(alpha: 0.3), blurRadius: 10)]
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: const [
-                                      Icon(Icons.phone_disabled, size: 16, color: Colors.redAccent),
-                                      SizedBox(width: 6),
-                                      Text("Bağlantıyı Kes", style: TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-
-                        AnimatedPositioned(
-                          duration: const Duration(milliseconds: 300),
-                          curve: Curves.easeOutCubic,
-                          left: !_isLeftHanded ? 30.0 : null, 
-                          right: _isLeftHanded ? 30.0 : null, 
-                          top: menuY - 240, 
-                          child: AnimatedOpacity(
-                            duration: const Duration(milliseconds: 300),
-                            opacity: (showSearchField || activeIndex == -1 || _replyingToMessage == null) ? 0.0 : 1.0, 
-                            child: IgnorePointer(
-                              ignoring: showSearchField || activeIndex == -1 || _replyingToMessage == null, 
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                decoration: BoxDecoration(color: Colors.blueGrey.shade900.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.5))),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.reply, size: 12, color: Colors.blueAccent), const SizedBox(width: 6),
-                                    Text("Yanıtlanıyor: ${_formatDuration(_replyingToMessage?.durationInSeconds ?? 0)}", style: const TextStyle(fontSize: 10, color: Colors.white70)), const SizedBox(width: 8),
-                                    GestureDetector(onTap: () => setState(() => _replyingToMessage = null), child: const Icon(Icons.close, size: 12, color: Colors.white54))
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-
-                        Positioned(
-                          left: menuX - 162.5, top: menuY - 162.5,  
-                          child: AnimatedOpacity(
-                            duration: const Duration(milliseconds: 300),
-                            opacity: showSearchField ? 0.3 : 1.0, 
-                            child: IgnorePointer(ignoring: showSearchField, child: _buildPTTButtonAndHelpers()),
-                          ),
-                        ),
-                        
-                        if (anyLiveActive && !showSearchField)
-                          Positioned(
-                            bottom: 40, left: 0, right: 0,
-                            child: Center(
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(30),
-                                  border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.3), width: 1),
-                                  boxShadow: [BoxShadow(color: Colors.greenAccent.withValues(alpha: 0.1), blurRadius: 10)]
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    _buildLiveAnimation(), const SizedBox(width: 12),
-                                    AnimatedBuilder(
-                                      animation: _breatheController,
-                                      builder: (context, child) {
-                                        double opacity = selectedLiveAnimation == "Nefes" ? 0.5 + (_breatheController.value * 0.5) : 1.0;
-                                        return Text(
-                                          "CANLI  ${_formatDuration(_liveDuration)}",
-                                          style: TextStyle(
-                                            color: Colors.greenAccent.withValues(alpha: opacity), fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 2.0,
-                                            shadows: selectedLiveAnimation == "Nefes" ? [Shadow(color: Colors.greenAccent, blurRadius: 10 * _breatheController.value)] : [],
-                                          ),
-                                        );
-                                      }
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-
-                        Positioned(
-                          top: menuY - 220, left: _isLeftHanded ? null : 30, right: _isLeftHanded ? 30 : null,
-                          child: AnimatedSwitcher(duration: const Duration(milliseconds: 300), child: showSearchField ? _buildNeonSearchField() : const SizedBox.shrink()),
-                        ),
-                        if (!showSearchField)
-                          Positioned(
-                            top: 60, left: 30, right: 30, 
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: const [
-                                    Text("4:40", style: TextStyle(fontSize: 28, fontWeight: FontWeight.w300, color: Colors.white)), 
-                                    Text("Active", style: TextStyle(color: Colors.cyanAccent, fontSize: 10, fontWeight: FontWeight.bold)),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-
-                        if (!showSearchField)
-                          Positioned(
-                            left: !_isLeftHanded ? 20.0 : null, 
-                            right: _isLeftHanded ? 20.0 : null, 
-                            top: menuY - 150, 
-                            child: GhostHandToggle(
-                              isLeftHanded: _isLeftHanded,
-                              onToggle: () {
-                                setState(() { _isLeftHanded = !_isLeftHanded; });
-                                if (hapticEnabled) HapticFeedback.selectionClick();
-                              },
-                            ),
-                          ),
-
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }
-        );
-      }
-    );
-  }
-// 🟢 YENİ: Giden aramayı manuel iptal etme fonksiyonu
-  void _cancelOutgoingCall() {
-    if (activeIndex != -1 && isWaitingForLiveApproval) {
-      String name = allContacts[activeIndex]['name'];
-      
-      // Karşı tarafa giden sinyali kes
-      SocketService().cancelCall(name); 
-      _outgoingCallTimer?.cancel();
-      
-      setState(() {
-        isWaitingForLiveApproval = false; // Arama modundan çık
-      });
-      
-      if (hapticEnabled) HapticFeedback.heavyImpact(); // Titreşim hissi
-      
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text("Arama iptal edildi."), 
-        backgroundColor: Colors.orange,
-        duration: Duration(seconds: 2),
-      ));
-    }
-  }
-
-  // 🟢 YENİ: Arama yapılırken mikrofonun etrafında yanıp sönen kırmızı dalgalar
-  Widget _buildCallingWave(int index) {
-    return AnimatedBuilder(
-      animation: _breatheController,
-      builder: (context, child) {
-        double sizeMultiplier = 1.0 + (_breatheController.value * (0.3 + (index * 0.2)));
-        return Container(
-          width: 117 * sizeMultiplier, height: 117 * sizeMultiplier,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: Colors.redAccent.withValues(alpha: (0.3 - (_breatheController.value * 0.2)).clamp(0.0, 1.0)), 
-              width: 2.0
-            ),
-          ),
-        );
-      }
-    );
-  }
- Widget _buildPTTButtonAndHelpers() {
-    return SizedBox(
-      width: 325, height: 325,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // Sadece ses kaydı varken iptal yazısı çıksın (Arama beklenirken çıkmasın)
-          if (isRecording && !isWaitingForLiveApproval)
-            AnimatedPositioned(
-              duration: const Duration(milliseconds: 100),
-              left: _isLeftHanded ? null : 20 + _dragOffset, 
-              right: _isLeftHanded ? 20 - _dragOffset : null, 
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 200),
-                opacity: _isCancelled ? 0.0 : (1.0 - (_dragOffset.abs() / 100)).clamp(0.0, 1.0),
-                child: Row(
-                  children: [
-                    if (!_isLeftHanded) const Icon(Icons.chevron_left, color: Colors.white54),
-                    const Text(" İptal demek için kaydır ", style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
-                    if (_isLeftHanded) const Icon(Icons.chevron_right, color: Colors.white54),
-                  ],
-                ),
-              ),
-            ),
-          
-          if (isRecording && _isCancelled && !isWaitingForLiveApproval) 
-            const Positioned(top: 50, child: Icon(Icons.delete, color: Colors.redAccent, size: 30)),
-            
-          Transform.translate(
-            offset: Offset(_dragOffset, 0), 
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque, 
-              // 🟢 ARAMA BEKLENİYORSA BASILI TUTMAYI (PTT) DEVRE DIŞI BIRAK!
-              onLongPressStart: isWaitingForLiveApproval ? null : (_) => _startRecording(),
-              onLongPressMoveUpdate: isWaitingForLiveApproval ? null : _updateRecordingDrag,
-              onLongPressEnd: isWaitingForLiveApproval ? null : (_) => _stopRecording(),
-              onLongPressCancel: isWaitingForLiveApproval ? null : () => _stopRecording(),
-              onTap: () {
-                 if (isWaitingForLiveApproval) {
-                   // 🟢 BUTONA DOKUNULURSA ARAMAYI İPTAL ET
-                   _cancelOutgoingCall();
-                 } else if (context.mounted) { 
-                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Kaydetmek için mikrofona basılı tutun."), duration: Duration(seconds: 1)));
-                 }
-              },
-              child: SizedBox(
-                width: 130, height: 130,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    if (isRecording && !_isCancelled && !isWaitingForLiveApproval) 
-                      ...List.generate(3, (i) => _buildRealWave(i)),
-                      
-                    // 🟢 ARAMA YAPILIRKEN ARKADA ÇIKAN KIRMIZI SİNYAL DALGALARI
-                    if (isWaitingForLiveApproval)
-                      ...List.generate(2, (i) => _buildCallingWave(i)),
-                    
-                    ScaleTransition(
-                      scale: CurvedAnimation(
-                        parent: _entranceController,
-                        curve: const Interval(0.0, 0.5, curve: Curves.elasticOut), 
-                      ),
-                      child: SizedBox(
-                        width: 117, height: 117,
-                        child: ValueListenableBuilder<double>(
-                          valueListenable: _audioLevel,
-                          builder: (context, level, child) {
-                            return CustomPaint(
-                              painter: NeonRingPainter(
-                                // ARAMA DURUMUNDA HALKA RENGİ KIRMIZI OLUR
-                                innerColor: isWaitingForLiveApproval ? Colors.redAccent : Colors.cyanAccent, 
-                                outerColor: isWaitingForLiveApproval ? Colors.red.shade900 : Colors.redAccent.shade200, 
-                                isRecording: isRecording || isWaitingForLiveApproval, 
-                                isLeftHanded: _isLeftHanded, 
-                                audioLevel: level
-                              ),
-                              child: Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    // 🟢 İKON DİNAMİK OLARAK DEĞİŞİR (Ahize Kapat İkonu)
-                                    Icon(
-                                      isWaitingForLiveApproval 
-                                          ? Icons.call_end 
-                                          : (_isCancelled ? Icons.delete_outline : (isRecording ? Icons.graphic_eq : Icons.mic)), 
-                                      size: isRecording || isWaitingForLiveApproval ? 35 : 45, 
-                                      color: Colors.white
-                                    ),
-                                    
-                                    // 🟢 YAZI DİNAMİK OLARAK DEĞİŞİR
-                                    if (isWaitingForLiveApproval)
-                                      const Padding(padding: EdgeInsets.only(top: 4.0), child: Text("İPTAL ET", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1.0)))
-                                    else if (isRecording && !_isCancelled) 
-                                      Padding(padding: const EdgeInsets.only(top: 4.0), child: Text(_formatDuration(_recordDuration), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1.0))),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRealWave(int index) {
-    return ValueListenableBuilder<double>(
-      valueListenable: _audioLevel,
-      builder: (context, level, child) {
-        double sizeMultiplier = 1.0 + (level * (1.2 + (index * 0.4)));
-        return TweenAnimationBuilder(
-          key: ValueKey(index), 
-          tween: Tween(begin: 1.0, end: sizeMultiplier),
-          duration: const Duration(milliseconds: 100), 
-          builder: (context, double val, _) {
-            return Container(
-              width: 117 * val, height: 117 * val,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.redAccent.withValues(alpha: (0.4 - (level * 0.2)).clamp(0.1, 1.0)), width: 2 + (level * 2)),
-              ),
-            );
-          },
-        );
+      selfDestructSeconds: selfDestructSeconds, onSelfDestructChanged: (val) => setState(() => selfDestructSeconds = val), liveAudioPermission: _liveAudioPermission, onLivePermissionChanged: (val) => setState(() => _liveAudioPermission = val),
+      notificationsEnabled: _notificationsEnabled, onNotificationsChanged: (val) => setState(() => _notificationsEnabled = val), messageNotificationsEnabled: _messageNotificationsEnabled, onMessageNotificationsChanged: (val) => setState(() => _messageNotificationsEnabled = val), callNotificationsEnabled: _callNotificationsEnabled, onCallNotificationsChanged: (val) => setState(() => _callNotificationsEnabled = val),
+      callRingtone: _callRingtone, 
+      onRingtoneChanged: (val) async { setState(() => _callRingtone = val); final prefs = await SharedPreferences.getInstance(); prefs.setString('call_ringtone', val); },
+      deleteFilterDays: deleteFilterDays, onDeleteFilterDaysChanged: (val) => setState(() => deleteFilterDays = val),
+      onClearOldMessages: (days) { final limitDate = DateTime.now().subtract(Duration(days: days)); setState(() { _allMessages.removeWhere((m) => m.isSaved && m.createdAt.isBefore(limitDate)); }); },
+      customBackgroundImagePath: _customBackgroundImagePath, onPickBackground: () => _pickImage(ImageSource.gallery, isBackground: true),
+      onRemoveBackground: () { setState(() { _customBackgroundImagePath = null; isBackgroundTransparent = true; }); }, 
+      onClosed: () { 
+        if (mounted) { 
+          setState(() { _isSettingsOpen = false; }); 
+          _loadLanguage(); 
+        } 
       },
     );
   }
 
-  Widget _buildIncomingWave(int index) {
-    return ValueListenableBuilder<double>(
-      valueListenable: _incomingAudioLevel,
-      builder: (context, level, child) {
-        double sizeMultiplier = 1.0 + (level * (0.6 + (index * 0.3)));
-        return TweenAnimationBuilder(
-          key: ValueKey("incoming_$index"), 
-          tween: Tween(begin: 1.0, end: sizeMultiplier),
-          duration: const Duration(milliseconds: 100), 
-          builder: (context, double val, _) {
-            return Container(
-              width: 60 * val, height: 60 * val,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: Colors.greenAccent.withValues(alpha: (0.6 - (level * 0.3)).clamp(0.0, 1.0)), 
-                  width: 1.5 + (level * 2)
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
+  void _acceptIncomingCall() {
+     final currentCallerId = _pendingCallerId;
+     if (currentCallerId == null) { 
+       setState(() { _pttSlideOffset = 0.0; _isIncomingCallActive = false; }); 
+       return; 
+     }
+     _incomingRingTimer?.cancel(); _vibrationTimer?.cancel();
+     SocketService().acceptCall(currentCallerId);
+     try { NotificationService().cancelCallNotification(); } catch (_) { /* ignore */ }
+     
+     Future.delayed(const Duration(milliseconds: 300), () async {
+       final session = await AudioSession.instance;
+       session.setActive(true).catchError((_) => false);
+       if (mounted) {
+          setState(() {
+             int targetIdx = allContacts.indexWhere((c) => c['phone'] == currentCallerId);
+             if (targetIdx != -1) {
+               activeIndex = targetIdx;
+             }
+             _activeLiveContacts.add(currentCallerId); _resetLiveTimeoutForContact(currentCallerId);
+             _isIncomingCallActive = false; _pttSlideOffset = 0.0;
+             if (_pendingCallerId == currentCallerId) { 
+               _pendingCallerId = null; 
+               _pendingCallerName = null; 
+             }
+             _startLiveTimerIfNeeded(); 
+          });
+       }
+     });
   }
 
-  Widget _buildLiveAnimation() {
-    switch (selectedLiveAnimation) {
-      case "Mini Ekolayzır":
-        return ValueListenableBuilder<double>(
-          valueListenable: _audioLevel,
-          builder: (context, level, child) {
-            return Row(
-              mainAxisSize: MainAxisSize.min,
-              children: List.generate(4, (index) {
-                double barHeight = 4.0 + (level * 15.0 * (math.Random().nextDouble() + 0.5));
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 100), margin: const EdgeInsets.symmetric(horizontal: 2), width: 3, height: barHeight.clamp(4.0, 20.0),
-                  decoration: BoxDecoration(color: Colors.greenAccent, borderRadius: BorderRadius.circular(2), boxShadow: [BoxShadow(color: Colors.greenAccent.withValues(alpha: 0.5), blurRadius: 4)]),
-                );
-              }),
-            );
-          },
-        );
-      case "Radar":
-        return SizedBox(
-          width: 24, height: 24,
-          child: AnimatedBuilder(
-            animation: _pulseController,
-            builder: (context, child) {
-              return Stack(
-                alignment: Alignment.center,
-                children: [
-                  Container(
-                    width: 24 * _pulseController.value, height: 24 * _pulseController.value,
-                    decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.greenAccent.withValues(alpha: 1.0 - _pulseController.value), width: 1.5)),
-                  ),
-                  Container(width: 6, height: 6, decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.greenAccent)),
-                ],
-              );
-            }
-          ),
-        );
-      case "Nabız":
-        return AnimatedBuilder(
-          animation: _pulseController,
-          builder: (context, child) {
-            return Container(
-              width: 10, height: 10,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle, color: Colors.greenAccent.withValues(alpha: _pulseController.value > 0.5 ? 1.0 : 0.3),
-                boxShadow: [BoxShadow(color: Colors.greenAccent.withValues(alpha: _pulseController.value), blurRadius: 6)],
-              ),
-            );
-          }
-        );
-      case "Nefes":
-      default:
-        return const Icon(Icons.graphic_eq, color: Colors.greenAccent, size: 16);
-    }
+  void _rejectIncomingCall() {
+     final currentCallerId = _pendingCallerId;
+     if (currentCallerId == null) { 
+       setState(() { _pttSlideOffset = 0.0; _isIncomingCallActive = false; }); 
+       return; 
+     }
+     _incomingRingTimer?.cancel(); _vibrationTimer?.cancel();
+     SocketService().rejectCall(currentCallerId);
+     try { NotificationService().cancelCallNotification(); } catch (_) { /* ignore */ }
+     setState(() { _isIncomingCallActive = false; _pttSlideOffset = 0.0; if (_pendingCallerId == currentCallerId) { _pendingCallerId = null; _pendingCallerName = null; } });
   }
 
-  Widget _buildNeonSearchField() {
+  Widget _buildLabeledMenuBtn(IconData icon, Color color, String label, VoidCallback onTap) {
     return GestureDetector(
-      onTap: () {}, 
+      onTap: onTap,
       child: Container(
-        width: 250, height: 50,
-        decoration: BoxDecoration(
-          color: Colors.black87, borderRadius: BorderRadius.circular(25), border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.8), width: 1.5),
-          boxShadow: [
-            BoxShadow(color: Colors.cyanAccent.withValues(alpha: 0.3), blurRadius: 15, spreadRadius: 1),
-            BoxShadow(color: Colors.cyanAccent.withValues(alpha: 0.1), blurRadius: 30, spreadRadius: 5)
-          ]
-        ),
-        child: Center(
-          child: TextField(
-            controller: _searchController, focusNode: _focusNode, autofocus: true, cursorColor: Colors.cyanAccent,
-            style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: 1.0),
-            decoration: InputDecoration(
-              hintText: "Orbitte Ara...", hintStyle: TextStyle(color: Colors.cyanAccent.withValues(alpha: 0.4), fontStyle: FontStyle.italic), border: InputBorder.none,
-              prefixIcon: const Icon(Icons.saved_search, color: Colors.cyanAccent, size: 22),
-              suffixIcon: _searchController.text.isNotEmpty ? GestureDetector(onTap: () { _searchController.clear(); _handleSearch(""); }, child: const Icon(Icons.cancel, color: Colors.cyanAccent, size: 18)) : null,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-            ),
-            onChanged: _handleSearch,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildChatArea() {
-    List<AudioMessage> currentMessages = _activeMessages;
-    
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 50.0, bottom: 8.0, right: 15.0),
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: GestureDetector(
-              onTap: () {
-                setState(() {
-                  _showOnlyUnread = !_showOnlyUnread; 
-                });
-                if (hapticEnabled) {
-                  HapticFeedback.lightImpact();
-                }
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _showOnlyUnread ? Colors.redAccent.withValues(alpha: 0.2) : Colors.black45,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _showOnlyUnread ? Colors.redAccent : Colors.white24),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _showOnlyUnread ? Icons.filter_alt : Icons.filter_alt_outlined, 
-                      size: 14, 
-                      color: _showOnlyUnread ? Colors.redAccent : Colors.white54
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      _showOnlyUnread ? "Tümünü Göster" : "Okunmayanları Süz", 
-                      style: TextStyle(fontSize: 10, color: _showOnlyUnread ? Colors.redAccent : Colors.white54)
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-        
-        Expanded(
-          child: ListView.builder(
-            reverse: true, 
-            itemCount: currentMessages.length,
-            padding: const EdgeInsets.only(bottom: 10), 
-            itemBuilder: (context, index) {
-              final msg = currentMessages[index];
-              return GestureDetector(
-                onHorizontalDragUpdate: (details) {
-                  if (details.primaryDelta! > 3) { 
-                    setState(() => _replyingToMessage = msg); 
-                    HapticFeedback.selectionClick(); 
-                  }
-                },
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 12.0),
-                  child: msg.isLiveMessage 
-                    ? OrbitMessageBubbles.buildLiveLogView(msg, _formatDuration(msg.durationInSeconds)) 
-                    : (isCircularMessageStyle ? _buildCircularMessageStyle(msg) : _buildPillMessageStyle(msg)),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPillMessageStyle(AudioMessage msg) {
-    if (msg.isDeleted) return OrbitMessageBubbles.buildDeletedMessageView(msg);
-    Color baseColor = msg.isPendingDeletion && !msg.isSaved ? Colors.redAccent : (msg.isMe ? Colors.cyanAccent : Colors.greenAccent);
-
-    bool isPaused = msg.playProgress > 0.0 && msg.playProgress < 1.0 && !msg.isPlaying;
-    Color playIconColor = isPaused ? Colors.orangeAccent : Colors.white;
-    Color buttonBorderColor = isPaused ? Colors.orangeAccent : baseColor.withValues(alpha: 0.5);
-
-    return Align(
-      alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Column(
-        crossAxisAlignment: msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-        children: [
-          if (!msg.isMe && msg.senderName != null) Padding(padding: const EdgeInsets.only(left: 12, bottom: 4), child: Text(msg.senderName!, style: TextStyle(color: baseColor, fontSize: 11, fontWeight: FontWeight.bold))),
-          if (msg.repliedToMessageId != null)
-            Container(
-               margin: const EdgeInsets.only(bottom: 4, left: 12, right: 12), padding: const EdgeInsets.all(4),
-               decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(4), border: Border(left: BorderSide(color: baseColor, width: 2))),
-               child: const Text("Yanıtlanan Ses", style: TextStyle(fontSize: 9, color: Colors.white54, fontStyle: FontStyle.italic)),
-            ),
-
-          AnimatedBuilder(
-            animation: _dangerPulseController,
-            builder: (context, child) {
-              double borderAlpha = (msg.isPendingDeletion && !msg.isSaved) ? 0.5 + (_dangerPulseController.value * 0.5) : 0.8;
-              double blurRadius = (msg.isPendingDeletion && !msg.isSaved) ? 5 + (_dangerPulseController.value * 15) : 10;
-              return Container(
-                margin: const EdgeInsets.symmetric(horizontal: 4), padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8), width: 150, 
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.65), 
-                  border: Border.all(color: baseColor.withValues(alpha: borderAlpha), width: 1.0),
-                  boxShadow: [BoxShadow(color: baseColor.withValues(alpha: 0.3), blurRadius: blurRadius, spreadRadius: 1)],
-                  borderRadius: BorderRadius.circular(20), 
-                ),
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Row(
-                      children: [
-                        GestureDetector(
-                          onTap: () => _playMessage(msg),
-                          child: Container(
-                            width: 28, height: 28, 
-                            decoration: BoxDecoration(shape: BoxShape.circle, color: baseColor.withValues(alpha: 0.2), border: Border.all(color: buttonBorderColor)),
-                            child: Icon(msg.isPlaying ? Icons.pause : Icons.play_arrow, size: 16, color: playIconColor),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Stack(
-                                alignment: Alignment.centerLeft,
-                                children: [
-                                  SizedBox(
-                                    width: double.infinity, height: 16, 
-                                    child: CustomPaint(painter: SmoothWaveformPainter(progress: msg.playProgress, isPlaying: msg.isPlaying, activeColor: isPaused ? Colors.orangeAccent : baseColor, time: DateTime.now().millisecondsSinceEpoch / 150)),
-                                  ),
-                                  Positioned(
-                                    left: ((80) * msg.playProgress).clamp(0, double.infinity),
-                                    child: Container(width: 8, height: 8, decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white, boxShadow: [BoxShadow(color: Colors.white, blurRadius: 4)])),
-                                  )
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(_formatDuration(msg.durationInSeconds), style: const TextStyle(fontSize: 9, color: Colors.white70, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            GestureDetector(
-                               onTap: () {
-                                 setState(() {
-                                   if (msg.playbackSpeed == 1.0) {
-                                     msg.playbackSpeed = 1.5;
-                                   } else if (msg.playbackSpeed == 1.5) {
-                                     msg.playbackSpeed = 2.0;
-                                   } else {
-                                     msg.playbackSpeed = 1.0;
-                                   }
-                                 });
-                               },
-                               child: Container(
-                                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                                 decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
-                                 child: Text("${msg.playbackSpeed}x", style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.white)),
-                               ),
-                            ),
-                            const SizedBox(height: 4),
-                            GestureDetector(
-                              onTap: () {
-                                if (!msg.isSaved) { 
-                                  setState(() { msg.isSaved = true; msg.isPendingDeletion = false; }); 
-                                } else {
-                                  showDialog(
-                                    context: context,
-                                    builder: (c) => AlertDialog(
-                                      backgroundColor: Colors.grey.shade900,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                      title: const Text("Kaydı Sil", style: TextStyle(color: Colors.white, fontSize: 16)),
-                                      content: const Text("Bu kayıtlı ses dosyasını tamamen silmek istiyor musunuz?", style: TextStyle(color: Colors.white70, fontSize: 14)),
-                                      actions: [
-                                        TextButton(onPressed: () => Navigator.pop(c), child: const Text("İptal", style: TextStyle(color: Colors.white54))),
-                                        TextButton(
-                                          onPressed: () { 
-                                            Navigator.pop(c); 
-                                            setState(() { msg.isSaved = false; msg.isDeleted = true; }); 
-                                          },
-                                          child: const Text("Evet, Sil", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }
-                              },
-                              child: Icon(msg.isSaved ? Icons.bookmark : Icons.bookmark_border, size: 14, color: msg.isSaved ? Colors.orangeAccent : (msg.isPendingDeletion ? Colors.redAccent : Colors.white70)),
-                            ),
-                          ],
-                        )
-                      ],
-                    ),
-                    if (msg.isPendingDeletion && !msg.isSaved)
-                      Positioned(
-                        bottom: -6, left: 0, right: 0,
-                        child: TweenAnimationBuilder<double>(
-                          tween: Tween<double>(begin: msg.deletionSecondsRemaining / selfDestructSeconds, end: (msg.deletionSecondsRemaining - 1) / selfDestructSeconds),
-                          duration: const Duration(seconds: 1),
-                          builder: (context, value, child) {
-                            return FractionallySizedBox(
-                              alignment: Alignment.centerLeft, widthFactor: value.clamp(0.0, 1.0),
-                              child: Container(height: 2, decoration: BoxDecoration(color: Colors.redAccent, boxShadow: [BoxShadow(color: Colors.redAccent, blurRadius: 4)])),
-                            );
-                          },
-                        ),
-                      ),
-                    if (msg.isPendingDeletion && !msg.isSaved)
-                      Positioned(
-                        top: -12, left: 15, 
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5))),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.delete_outline, color: Colors.redAccent, size: 10), const SizedBox(width: 2),
-                              Text("${msg.deletionSecondsRemaining}s", style: const TextStyle(fontSize: 9, color: Colors.redAccent, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              );
-            }
-          ),
-          
-          Padding(
-            padding: EdgeInsets.only(top: 4, right: msg.isMe ? 8.0 : 0, left: msg.isMe ? 0 : 8.0),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  msg.isRead && msg.readTime != null ? "${msg.time} • Dinlendi" : msg.time,
-                  style: TextStyle(
-                    fontSize: 11, 
-                    color: msg.isRead ? Colors.cyanAccent.withValues(alpha: 0.8) : Colors.white54,
-                    fontWeight: FontWeight.w500
-                  ),
-                ),
-                if (msg.isMe) ...[
-                  const SizedBox(width: 4),
-                  Icon(
-                    msg.isRead ? Icons.done_all : Icons.check, 
-                    size: 18, 
-                    color: msg.isRead ? Colors.blueAccent.shade200 : Colors.white54,
-                  ),
-                ]
-              ],
-            ),
-          ),
-          
-          if (msg.showTranscription && !msg.isPendingDeletion)
-            Container(
-               margin: const EdgeInsets.only(top: 4, bottom: 6, left: 8, right: 8), padding: const EdgeInsets.all(8), width: 150, 
-               decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(12)),
-               child: Text(msg.transcriptionText, style: const TextStyle(fontSize: 9, color: Colors.white70, fontStyle: FontStyle.italic)),
-            )
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCircularMessageStyle(AudioMessage msg) {
-    if (msg.isDeleted) return OrbitMessageBubbles.buildDeletedMessageView(msg);
-    Color baseColor = msg.isPendingDeletion && !msg.isSaved ? Colors.redAccent : (msg.isMe ? Colors.cyanAccent : Colors.greenAccent);
-    
-    bool isPaused = msg.playProgress > 0.0 && msg.playProgress < 1.0 && !msg.isPlaying;
-    Color playIconColor = isPaused ? Colors.orangeAccent : Colors.white;
-
-    return Align(
-      alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        child: Column(
-          crossAxisAlignment: msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        color: Colors.transparent, 
+        padding: const EdgeInsets.symmetric(vertical: 6.0),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: _isLeftHanded ? MainAxisAlignment.start : MainAxisAlignment.end,
           children: [
-            if (!msg.isMe && msg.senderName != null) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(msg.senderName!, style: TextStyle(color: baseColor, fontSize: 10, fontWeight: FontWeight.bold))),
-            SizedBox(
-              width: 90, height: 90, 
-              child: AnimatedBuilder(
-                animation: _dangerPulseController,
-                builder: (context, child) {
-                  double borderAlpha = (msg.isPendingDeletion && !msg.isSaved) ? 0.5 + (_dangerPulseController.value * 0.5) : 0.6;
-                  double blurRadius = (msg.isPendingDeletion && !msg.isSaved) ? 5 + (_dangerPulseController.value * 15) : 10;
-                  return Stack(
-                    alignment: Alignment.center,
-                    clipBehavior: Clip.none,
-                    children: [
-                      Container(
-                        width: 75, height: 75,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle, color: Colors.black.withValues(alpha: 0.6),
-                          border: Border.all(color: isPaused ? Colors.orangeAccent : baseColor.withValues(alpha: borderAlpha), width: 1.0),
-                          boxShadow: [BoxShadow(color: baseColor.withValues(alpha: 0.2), blurRadius: blurRadius, spreadRadius: 1)]
-                        ),
-                      ),
-                      SizedBox(
-                        width: 75, height: 75,
-                        child: CircularProgressIndicator(
-                          value: (msg.isPendingDeletion && !msg.isSaved) ? (msg.deletionSecondsRemaining / selfDestructSeconds) : (msg.playProgress > 0 ? msg.playProgress : 1.0), 
-                          strokeWidth: 2, color: isPaused ? Colors.orangeAccent : baseColor, backgroundColor: Colors.transparent
-                        ),
-                      ),
-                      Container(
-                        width: 60, height: 60,
-                        decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.black.withValues(alpha: 0.8), border: Border.all(color: baseColor.withValues(alpha: 0.3), width: 1)),
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            CustomPaint(
-                              size: const Size(60, 60),
-                              painter: CircularWaveformPainter(progress: msg.playProgress, isPlaying: msg.isPlaying, activeColor: isPaused ? Colors.orangeAccent : baseColor, inactiveColor: Colors.white24, time: DateTime.now().millisecondsSinceEpoch / 150),
-                            ),
-                            Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const SizedBox(height: 6), 
-                                GestureDetector(
-                                  onTap: () => _playMessage(msg),
-                                  child: Icon(msg.isPlaying ? Icons.pause : Icons.play_arrow, size: 20, color: playIconColor),
-                                ),
-                                Text(_formatDuration(msg.durationInSeconds), style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.white)),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (msg.isPendingDeletion && !msg.isSaved)
-                        Positioned(
-                          top: -5, left: -5,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                            decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5))),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.delete_outline, color: Colors.redAccent, size: 10), const SizedBox(width: 2),
-                                Text("${msg.deletionSecondsRemaining}s", style: const TextStyle(fontSize: 9, color: Colors.redAccent, fontWeight: FontWeight.bold)),
-                              ],
-                            ),
-                          ),
-                        ),
-                      Positioned(
-                        right: -5, top: 15,
-                        child: GestureDetector(
-                           onTap: () {
-                             setState(() {
-                               if (msg.playbackSpeed == 1.0) {
-                                 msg.playbackSpeed = 1.5;
-                               } else if (msg.playbackSpeed == 1.5) {
-                                 msg.playbackSpeed = 2.0;
-                               } else {
-                                 msg.playbackSpeed = 1.0;
-                               }
-                             });
-                           },
-                           child: Container(
-                             padding: const EdgeInsets.all(4),
-                             decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.blueGrey.shade900, border: Border.all(color: Colors.white24)),
-                             child: Text("${msg.playbackSpeed}x", style: const TextStyle(fontSize: 7, fontWeight: FontWeight.bold, color: Colors.white)),
-                           ),
-                        ),
-                      ),
-                      Positioned(
-                        right: 0, bottom: 0,
-                        child: GestureDetector(
-                          onTap: () {
-                            if (!msg.isSaved) { 
-                              setState(() { msg.isSaved = true; msg.isPendingDeletion = false; }); 
-                            } else {
-                              showDialog(
-                                context: context,
-                                builder: (c) => AlertDialog(
-                                  backgroundColor: Colors.grey.shade900,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                  title: const Text("Kaydı Sil", style: TextStyle(color: Colors.white, fontSize: 16)),
-                                  content: const Text("Bu kayıtlı ses dosyasını tamamen silmek istiyor musunuz?", style: TextStyle(color: Colors.white70, fontSize: 14)),
-                                  actions: [
-                                    TextButton(onPressed: () => Navigator.pop(c), child: const Text("İptal", style: TextStyle(color: Colors.white54))),
-                                    TextButton(
-                                      onPressed: () { 
-                                        Navigator.pop(c); 
-                                        setState(() { msg.isSaved = false; msg.isDeleted = true; }); 
-                                      },
-                                      child: const Text("Evet, Sil", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }
-                          },
-                          child: CircleAvatar(radius: 10, backgroundColor: Colors.grey.shade900, child: Icon(msg.isSaved ? Icons.bookmark : Icons.bookmark_border, size: 10, color: msg.isSaved ? Colors.orangeAccent : (msg.isPendingDeletion ? Colors.redAccent : Colors.white70))),
-                        ),
-                      ),
-                    ],
-                  );
-                }
+            if (!_isLeftHanded) ...[
+              Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 14),
+            ],
+            
+            if (_isLeftHanded) const SizedBox(width: 3.5),
+            
+            Container(
+              width: 48, height: 48, 
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+                border: Border.all(color: color.withValues(alpha: 0.5), width: 1.5),
               ),
+              child: Icon(icon, color: color, size: 22),
             ),
             
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    msg.isRead && msg.readTime != null ? "${msg.time} • Dinlendi" : msg.time,
-                    style: TextStyle(
-                      fontSize: 11, 
-                      color: msg.isRead ? Colors.cyanAccent.withValues(alpha: 0.8) : Colors.white54,
-                      fontWeight: FontWeight.w500
-                    ),
-                  ),
-                  if (msg.isMe) ...[
-                    const SizedBox(width: 4),
-                    Icon(
-                      msg.isRead ? Icons.done_all : Icons.check,
-                      size: 18,
-                      color: msg.isRead ? Colors.blueAccent.shade200 : Colors.white54,
-                    ),
-                  ]
-                ],
-              ),
-            ),
+            if (!_isLeftHanded) const SizedBox(width: 3.5),
+            
+            if (_isLeftHanded) ...[
+              const SizedBox(width: 14),
+              Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+            ],
           ],
         ),
       ),
     );
   }
 
-  int _getUnreadCount(String contactName) {
-    return _allMessages.where((msg) => msg.contactName == contactName && !msg.isMe && !msg.isRead).length;
-  }
-
-  Widget _buildOrbitalItem({required int index, required double centerX, required double centerY, required double radius, required double spacing, required Map<String, dynamic> data, required double globalAngle}) {
-    bool isMatch = true;
-    if (showSearchField && _searchController.text.isNotEmpty) {
-      isMatch = data['name'].toLowerCase().contains(_searchController.text.toLowerCase());
+  void _promptDeleteActiveContact() {
+    if (activeIndex == -1 || allContacts[activeIndex]['isEmpty'] == true) {
+      return;
     }
-    bool isActive = (index == activeIndex) && !showSearchField;
-    bool isLive = _activeLiveContacts.contains(data['name']); 
-    bool anyLiveActive = _activeLiveContacts.isNotEmpty;
-    bool isEmptySlot = data['isEmpty'] == true;
+    int indexToDelete = activeIndex;
+    String nameToDel = allContacts[indexToDelete]['name'];
 
-    double startAngle = -0.35 * math.pi; 
-    double angle = startAngle - (index * spacing) + _scrollOffset;
-
-    double baseOpacity = 1.0;
-    if (angle > -0.1 * math.pi || angle < -1.8 * math.pi) baseOpacity = 0.0;
-    if (showSearchField) {
-       if (_searchController.text.isEmpty) {
-         baseOpacity = 0.3; 
-       } else {
-         baseOpacity = isMatch ? 1.0 : 0.1;
-       }
-    }
-
-    double fadeOpacity = 1.0;
-    double fadeDistance = 40.0; 
-    double tempX = centerX + radius * math.cos(angle);
-    if (_isLeftHanded) tempX = centerX - radius * math.cos(angle);
-
-    if (!_isLeftHanded) {
-      double dist = (centerX + radius - 15) - tempX; 
-      if (dist <= 0) {
-        fadeOpacity = 0.0; 
-      } else if (dist < fadeDistance) {
-        fadeOpacity = dist / fadeDistance; 
-      }
-    } else {
-      double dist = tempX - (centerX - radius + 15);
-      if (dist <= 0) {
-        fadeOpacity = 0.0; 
-      } else if (dist < fadeDistance) {
-        fadeOpacity = dist / fadeDistance; 
-      }
-    }
-
-    double finalOpacity = baseOpacity * fadeOpacity;
-    if (finalOpacity < 0.0) finalOpacity = 0.0;
-    if (finalOpacity > 1.0) finalOpacity = 1.0;
-
-    bool showLaser = false;
-    Color laserColor = Colors.cyanAccent;
-    if (anyLiveActive && isActive && !isEmptySlot) { 
-      showLaser = true; 
-      laserColor = Colors.redAccent; 
-    } else if (!anyLiveActive && isActive && _showConnectionArrows && !isEmptySlot) { 
-      showLaser = true; 
-      laserColor = Colors.cyanAccent; 
-    }
-
-    double animVal = CurvedAnimation(
-      parent: _entranceController, 
-      curve: Interval(
-        (0.2 + (index * 0.08)).clamp(0.0, 1.0),
-        (0.8 + (index * 0.05)).clamp(0.0, 1.0),
-        curve: Curves.elasticOut 
-      )
-    ).value;
-
-    double currentRadius = 400.0 - (animVal * (400.0 - radius));
-    double currentAngle = angle + ((1.0 - animVal) * math.pi); 
-    
-    double animXOffset = currentRadius * math.cos(currentAngle);
-    double animYOffset = currentRadius * math.sin(currentAngle);
-    if (_isLeftHanded) animXOffset = -animXOffset;
-    double animGlobalAngle = math.atan2(animYOffset, animXOffset);
-
-    return AnimatedPositioned(
-      duration: const Duration(milliseconds: 300), 
-      curve: Curves.easeOutCubic,
-      left: centerX + animXOffset - 50, 
-      top: centerY + animYOffset - 50,
-      child: GestureDetector(
-        onTap: () {
-          if (isEmptySlot) {
-            _openContacts();
-          } else if (showSearchField) {
-            _onSearchedPersonSelected(data);
-          } else {
-            _onPersonSelected(index);
-          }
-        },
-        onLongPress: () { 
-          if (!showSearchField && !isEmptySlot) _requestLiveConnection(index); 
-        },
-        child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 200),
-          opacity: finalOpacity * animVal.clamp(0.0, 1.0), 
-          child: SizedBox(
-            width: 100, height: 100,
-            child: Stack(
-              alignment: Alignment.center,
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return Directionality(
+          textDirection: _currentLang == 'ar' ? TextDirection.rtl : TextDirection.ltr,
+          child: AlertDialog(
+            backgroundColor: Colors.blueGrey.shade900,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.redAccent, width: 1)),
+            title: Row(
               children: [
-                CustomPaint(
-                  painter: CurvedTextPainter(
-                    text: formatName(data['name']).toUpperCase(),
-                    radius: 46, 
-                    color: isEmptySlot ? Colors.white30 : ((showSearchField && isMatch && _searchController.text.isNotEmpty) ? Colors.orangeAccent : (isLive ? Colors.greenAccent : (isActive ? Colors.cyanAccent : Colors.white70))), 
-                    statusColor: (data['isGroup'] == true || isEmptySlot) ? null : _getStatusColor(data['status']), 
-                    baseAngle: animGlobalAngle, 
-                  ),
-                ),
-                
-                if (isEmptySlot)
-                  Container(
-                    width: 60, height: 60,
-                    decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white24, width: 2), color: Colors.white.withValues(alpha: 0.05)),
-                    child: const Icon(Icons.person_add_alt_1, color: Colors.white54, size: 24),
-                  )
-                else
-                  Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      if (_currentlyPlayingQueueItemSender == data['name'])
-                        ...List.generate(3, (i) => _buildIncomingWave(i)),
-                        
-                      _buildAvatar(data, isActive, isMatch, isLive),
-                    ],
-                  ),
-                  
-                if (showLaser) Positioned.fill(child: Transform.rotate(angle: animGlobalAngle + math.pi, child: Padding(padding: const EdgeInsets.only(left: 35.0), child: Align(alignment: Alignment.centerLeft, child: ConnectionArrows(color: laserColor))))),
+                const Icon(Icons.warning_amber_rounded, color: Colors.redAccent),
+                const SizedBox(width: 10),
+                Text(_t('rm_orbit'), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAvatar(Map<String, dynamic> item, bool isActive, bool isMatch, bool isLive) {
-    bool isGroup = item['isGroup'] ?? false;
-    Color ringColor;
-    Color innerColor;
-    if (isLive) { 
-      ringColor = Colors.greenAccent; 
-      innerColor = Colors.black.withValues(alpha: 0.9); 
-    } else if (isActive) { 
-      ringColor = Colors.cyanAccent; 
-      innerColor = Colors.black.withValues(alpha: 0.9); 
-    } else if (showSearchField && _searchController.text.isNotEmpty && isMatch) { 
-      ringColor = Colors.orangeAccent; 
-      innerColor = Colors.black.withValues(alpha: 0.9); 
-    } else {
-      ringColor = Colors.white30; 
-      if (isGroup) {
-        innerColor = Colors.deepPurpleAccent.withValues(alpha: 0.8);
-      } else if (item['name'] == _userName) {
-        innerColor = _myCustomColor;
-      } else {
-        innerColor = _getAutoAvatarColor(item['name']);
-      }
-    }
-
-    int unreadCount = _getUnreadCount(item['name']); 
-
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          width: 60, height: 60, 
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: ringColor, width: (isActive || isLive) ? 5.0 : 4.0),
-            color: Colors.transparent, 
-            boxShadow: [ if (isActive || isLive) BoxShadow(color: ringColor.withValues(alpha: 0.5), blurRadius: 10) ],
-          ),
-          padding: const EdgeInsets.all(7.0), 
-          child: Container(
-            decoration: BoxDecoration(shape: BoxShape.circle, color: innerColor), 
-            child: Center(
-              child: isGroup 
-                ? const Icon(Icons.groups, size: 22, color: Colors.white) 
-                : Text(getInitials(item['name']), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.5))
-            )
-          ),
-        ),
-        
-        if (unreadCount > 0)
-          Positioned(
-            top: -2, right: -2,
-            child: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.redAccent, shape: BoxShape.circle,
-                border: Border.all(color: Colors.black, width: 2),
-                boxShadow: [BoxShadow(color: Colors.redAccent.withValues(alpha: 0.5), blurRadius: 6)]
+            content: Text("$nameToDel ${_t('del_warn')}", style: const TextStyle(color: Colors.white70)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(_t('cancel'), style: const TextStyle(color: Colors.white54)),
               ),
-              child: Text(
-                unreadCount > 9 ? "9+" : unreadCount.toString(),
-                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent.withValues(alpha: 0.2), foregroundColor: Colors.redAccent, elevation: 0),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  setState(() {
+                    allContacts[indexToDelete] = {"name": "Davet Et", "isEmpty": true};
+                    originalContacts[indexToDelete] = {"name": "Davet Et", "isEmpty": true};
+                    if (activeIndex == indexToDelete) {
+                      activeIndex = -1;
+                    }
+                  });
+                  if (hapticEnabled) { try { HapticFeedback.heavyImpact(); } catch (_) { /* ignore */ } }
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$nameToDel ${_t('removed')}"), backgroundColor: Colors.red.shade800));
+                },
+                child: Text(_t('del_btn'), style: const TextStyle(fontWeight: FontWeight.bold)),
               ),
-            ),
+            ],
           ),
-      ],
+        );
+      },
     );
-  }
-}
-
-class GhostHandToggle extends StatefulWidget {
-  final bool isLeftHanded;
-  final VoidCallback onToggle;
-
-  const GhostHandToggle({super.key, required this.isLeftHanded, required this.onToggle});
-
-  @override
-  State<GhostHandToggle> createState() => _GhostHandToggleState();
-}
-
-class _GhostHandToggleState extends State<GhostHandToggle> {
-  bool _isInteracting = false;
-  bool _isInitiallyVisible = true;
-  Timer? _fadeTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    _startFadeTimer();
-  }
-
-  void _startFadeTimer() {
-    _fadeTimer?.cancel();
-    _fadeTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted) {
-        setState(() {
-          _isInitiallyVisible = false;
-        });
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _fadeTimer?.cancel();
-    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onPanDown: (_) {
-        setState(() => _isInteracting = true);
-        _fadeTimer?.cancel(); 
-      },
-      onPanCancel: () {
-        setState(() => _isInteracting = false);
-        _startFadeTimer();
-      },
-      onPanEnd: (_) {
-        setState(() => _isInteracting = false);
-        _startFadeTimer();
-      },
-      onTapDown: (_) {
-        setState(() => _isInteracting = true);
-        _fadeTimer?.cancel();
-      },
-      onTapUp: (_) {
-        setState(() => _isInteracting = false);
-        widget.onToggle(); 
-        setState(() => _isInitiallyVisible = true); 
-        _startFadeTimer();
-      },
-      onTapCancel: () {
-        setState(() => _isInteracting = false);
-        _startFadeTimer();
-      },
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 500), 
-        opacity: _isInteracting ? 0.6 : (_isInitiallyVisible ? 0.10 : 0.01), 
-        child: Container(
-          width: 30, 
-          height: 300, 
-          color: Colors.transparent, 
-          child: CustomPaint(
-            painter: _GhostArrowPainter(isLeftHanded: widget.isLeftHanded),
-          ),
-        ),
-      ),
+    TextDirection layoutDirection = _currentLang == 'ar' ? TextDirection.rtl : TextDirection.ltr;
+
+    return Directionality(
+      textDirection: layoutDirection,
+      child: AnimatedBuilder(
+        animation: _entranceController,
+        builder: (context, child) {
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final double screenWidth = constraints.maxWidth;
+              final double screenHeight = constraints.maxHeight;
+              double orbitRadius = 105.0;
+              double menuX = screenWidth / 2;
+              double menuY = screenHeight - 280.0;
+              double itemSpacingAngle = 0.25 * math.pi;
+              double maxScroll = (allContacts.length * itemSpacingAngle) - (4 * itemSpacingAngle);
+              if (maxScroll < 0) {
+                maxScroll = 0;
+              }
+
+              String activeContactName = activeIndex != -1 ? allContacts[activeIndex]['name'] : "";
+              bool isGroup = activeIndex != -1 ? (allContacts[activeIndex]['isGroup'] ?? false) : false;
+              
+              bool isCurrentlyLive = false;
+              
+              if (activeIndex != -1) {
+                if (isGroup) {
+                   List<dynamic> members = allContacts[activeIndex]['members'] ?? [];
+                   isCurrentlyLive = members.any((m) => _activeLiveContacts.contains(m.toString()));
+                } else {
+                   isCurrentlyLive = _activeLiveContacts.contains(allContacts[activeIndex]['phone']);
+                }
+              }
+              bool anyLiveActive = _activeLiveContacts.isNotEmpty;
+              bool anyMenuExpanded = _isMenuExpanded || _isActiveMenuExpanded;
+
+              return Scaffold(
+                backgroundColor: Colors.black,
+                resizeToAvoidBottomInset: false,
+                body: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () { 
+                    if (showSearchField) { 
+                      _closeSearchMode(); 
+                    } else if (anyMenuExpanded) {
+                      setState(() {
+                         _isMenuExpanded = false;
+                         _isActiveMenuExpanded = false;
+                      });
+                    } else if (activeIndex != -1 && _activeSubOrbit == SubOrbitType.none) {
+                      setState(() {
+                        activeIndex = -1;
+                        _isActiveMenuExpanded = false;
+                        _replyingToMessage = null;
+                      });
+                    } else { 
+                      FocusScope.of(context).unfocus(); 
+                    } 
+                  },
+                  
+                  onPanStart: (details) {
+                    if (showSearchField || _activeSubOrbit != SubOrbitType.none) {
+                      return;
+                    }
+                    if (_interactionNodeIndex != -1) {
+                      return;
+                    }
+
+                    double dx = details.localPosition.dx - menuX;
+                    double dy = details.localPosition.dy - menuY;
+                    double distance = math.sqrt(dx * dx + dy * dy);
+
+                    if (distance >= 50.0 && distance <= 180.0) {
+                      _isValidOrbitDrag = true;
+                      _lastDragAngle = math.atan2(dy, dx);
+                    } else {
+                      _isValidOrbitDrag = false;
+                    }
+                  },
+                  onPanUpdate: (details) {
+                    if (!_isValidOrbitDrag || _interactionNodeIndex != -1) {
+                      return;
+                    }
+                    if (showSearchField || _activeSubOrbit != SubOrbitType.none) {
+                      return;
+                    }
+
+                    double dx = details.localPosition.dx - menuX;
+                    double dy = details.localPosition.dy - menuY;
+                    double currentAngle = math.atan2(dy, dx);
+
+                    double deltaAngle = currentAngle - _lastDragAngle;
+
+                    if (deltaAngle > math.pi) {
+                      deltaAngle -= 2 * math.pi;
+                    }
+                    if (deltaAngle < -math.pi) {
+                      deltaAngle += 2 * math.pi;
+                    }
+
+                    deltaAngle *= 0.5;
+
+                    setState(() {
+                      if (_isLeftHanded) {
+                        _scrollOffset -= deltaAngle; 
+                      } else {
+                        _scrollOffset += deltaAngle;
+                      }
+
+                      if (_scrollOffset < -0.2) {
+                        _scrollOffset = -0.2;
+                      }
+                      if (_scrollOffset > maxScroll) {
+                        _scrollOffset = maxScroll;
+                      }
+
+                      _lastDragAngle = currentAngle;
+
+                      if (_ratchetEnabled) {
+                        _ratchetAccumulator += deltaAngle.abs();
+                        
+                        double threshold = Platform.isAndroid ? 0.20 : 0.15; 
+                        int debounceTime = Platform.isAndroid ? 120 : 80;
+
+                        if (_ratchetAccumulator >= threshold) { 
+                          _ratchetAccumulator -= threshold; 
+                          
+                          int now = DateTime.now().millisecondsSinceEpoch;
+                          if (now - _lastRatchetTime > debounceTime) {
+                            _lastRatchetTime = now;
+                            if (hapticEnabled) {
+                              try { 
+                                if (Platform.isAndroid) {
+                                  HapticFeedback.vibrate(); 
+                                } else {
+                                  HapticFeedback.selectionClick(); 
+                                }
+                              } catch (_) { /* ignore */ }
+                            }
+                          }
+                        }
+                      }
+                    });
+                  },
+                  onPanEnd: (details) {
+                    _isValidOrbitDrag = false;
+                    _ratchetAccumulator = 0.0; 
+                  },
+
+                  child: Stack(
+                    children: [
+                      if (_customBackgroundImagePath != null) 
+                        Positioned.fill(child: Image.file(File(_customBackgroundImagePath!), fit: BoxFit.cover))
+                      else if (!isBackgroundTransparent) 
+                        Container(color: Colors.black)
+                      else 
+                        Positioned.fill(child: Container(color: Colors.black)),
+
+                      if (_customBackgroundImagePath != null || isBackgroundTransparent)
+                        Positioned.fill(child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 12.0, sigmaY: 12.0), child: Container(color: Colors.black.withValues(alpha: 0.4)))),
+
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          ignoring: !(_isSettingsOpen || showSearchField || anyMenuExpanded),
+                          child: TweenAnimationBuilder<double>(
+                            tween: Tween<double>(begin: 0.0, end: (_isSettingsOpen || showSearchField || anyMenuExpanded) ? 12.0 : 0.0), duration: const Duration(milliseconds: 300), curve: Curves.easeOut,
+                            builder: (context, blurValue, child) {
+                              if (blurValue == 0.0) {
+                                return const SizedBox.shrink();
+                              }
+                              return BackdropFilter(filter: ImageFilter.blur(sigmaX: blurValue, sigmaY: blurValue), child: Container(color: Colors.black.withValues(alpha: (blurValue / 12.0) * 0.6)));
+                            },
+                          ),
+                        ),
+                      ),
+
+                      if (_currentlyPlayingQueueItemSender != null && !showSearchField)
+                        AnimatedPositioned(
+                          duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic, left: !_isLeftHanded ? 25.0 : null, right: _isLeftHanded ? 25.0 : null, top: menuY - 240,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              SizedBox(width: 32, height: 32, child: AnimatedBuilder(animation: _pulseController, builder: (context, child) { return Stack(alignment: Alignment.center, children: [Container(width: 32 * _pulseController.value, height: 32 * _pulseController.value, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.cyanAccent.withValues(alpha: (1.0 - _pulseController.value) * 0.6))), Icon(Icons.headset_mic, color: Colors.cyanAccent, size: 20 + (_pulseController.value * 4))]); })),
+                              const SizedBox(width: 8),
+                              Text(_currentlyPlayingQueueItemSender!.split(' ').first, style: const TextStyle(color: Colors.cyanAccent, fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 1.0, shadows: [Shadow(color: Colors.black87, blurRadius: 4, offset: Offset(1, 1)), Shadow(color: Colors.cyanAccent, blurRadius: 8)])),
+                            ],
+                          ),
+                        ),
+                    
+                      if (_whoIsSpeaking != null && !showSearchField && _currentlyPlayingQueueItemSender == null)
+                        AnimatedPositioned(
+                          duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic, left: !_isLeftHanded ? 25.0 : null, right: _isLeftHanded ? 25.0 : null, top: menuY - 240,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              SizedBox(width: 32, height: 32, child: AnimatedBuilder(animation: _pulseController, builder: (context, child) { return Stack(alignment: Alignment.center, children: [Container(width: 32 * _pulseController.value, height: 32 * _pulseController.value, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.redAccent.withValues(alpha: (1.0 - _pulseController.value) * 0.6))), const Icon(Icons.mic, color: Colors.redAccent, size: 20)]); })),
+                              const SizedBox(width: 8),
+                              Text("${_localContactsMap[_whoIsSpeaking] ?? _whoIsSpeaking} ${_t('is_spk')}", style: const TextStyle(color: Colors.redAccent, fontSize: 14, fontWeight: FontWeight.bold, fontStyle: FontStyle.italic)),
+                            ],
+                          ),
+                        ),
+
+                      if (activeIndex != -1 && !showSearchField && allContacts[activeIndex]['isEmpty'] != true)
+                        Positioned(
+                          top: 60, left: 0, right: 0, 
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(activeContactName, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: 1.5, shadows: [Shadow(color: Colors.black87, blurRadius: 4, offset: Offset(1, 1))])),
+                              if (isCurrentlyLive) ...[
+                                const SizedBox(height: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.redAccent.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5), width: 1.5)
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      SizedBox(width: 12, height: 12, child: AnimatedBuilder(animation: _pulseController, builder: (context, child) { return Container(decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.redAccent.withValues(alpha: _pulseController.value))); })),
+                                      const SizedBox(width: 6),
+                                      Text(_formatDuration(_liveDuration), style: const TextStyle(color: Colors.redAccent, fontSize: 14, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
+                              ] else if (allContacts[activeIndex]['status'] != null) ...[
+                                const SizedBox(height: 4),
+                                Text(allContacts[activeIndex]['status'] == UserStatus.offline ? _t('offline') : _t('online'), style: TextStyle(color: allContacts[activeIndex]['status'] == UserStatus.offline ? Colors.redAccent : Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.w600)),
+                              ],
+                              
+                              if (isCurrentlyLive) ...[
+                                const SizedBox(height: 12),
+                                GestureDetector(
+                                  onTap: _endLiveConnection,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                    decoration: BoxDecoration(color: Colors.redAccent.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.redAccent.withValues(alpha: 0.8), width: 1.5)),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min, 
+                                      children: [
+                                        const Icon(Icons.phone_disabled, size: 18, color: Colors.redAccent), 
+                                        const SizedBox(width: 8), 
+                                        Text(_t('disconnect'), style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold))
+                                      ]
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+
+                      ..._flyingEmojis.map((flying) {
+                        return TweenAnimationBuilder<double>(
+                          key: ValueKey(flying.id), tween: Tween(begin: 0.0, end: 1.0), duration: const Duration(milliseconds: 2500), curve: Curves.easeOutCubic,
+                          builder: (context, value, child) {
+                            return Positioned(
+                              left: flying.startX + math.sin(value * math.pi * 4) * 40, bottom: 150 + (value * 500), 
+                              child: Opacity(
+                                opacity: (1.0 - value).clamp(0.0, 1.0), 
+                                child: Transform.scale(
+                                  scale: 1.0 + (value * 0.5), 
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(flying.emoji, style: const TextStyle(fontSize: 36)),
+                                      if (flying.senderName != null) ...[
+                                         const SizedBox(width: 8),
+                                         Text(
+                                           flying.senderName!, 
+                                           style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold, shadows: [Shadow(color: Colors.black87, blurRadius: 4)])
+                                         ),
+                                      ]
+                                    ]
+                                  )
+                                )
+                              ),
+                            );
+                          },
+                        );
+                      }),
+
+                      if (activeIndex != -1 && !showSearchField && allContacts[activeIndex]['isEmpty'] != true)
+                        Positioned(
+                          top: (isGroup && isCurrentlyLive) ? 140 : 120, left: 10, right: 10, bottom: screenHeight - menuY + 220,
+                          child: ShaderMask(
+                            shaderCallback: (Rect bounds) { return const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.white, Colors.white, Colors.transparent], stops: [0.0, 0.15, 0.85, 1.0]).createShader(bounds); },
+                            blendMode: BlendMode.dstIn,
+                            child: OrbitChatList(
+                              activeMessages: _activeMessages, isCircularMessageStyle: isCircularMessageStyle, hapticEnabled: hapticEnabled, selfDestructSeconds: selfDestructSeconds,
+                              onPlayMessage: _playMessage, 
+                              onReplyMessage: (msg) { setState(() => _replyingToMessage = msg); if (hapticEnabled) { try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ } } },
+                              onSaveToggle: (msg, save) { setState(() { msg.isSaved = save; if (save) { msg.isPendingDeletion = false; } }); }, 
+                              onDeleteMessage: (msg) { setState(() { msg.isSaved = false; msg.isDeleted = true; }); }, 
+                              formatDuration: _formatDuration,
+                              onReactToMessage: (msg, emoji) { _handleEmojiSelection(emoji); },
+                            ),
+                          ),
+                        ),
+
+                      ...List.generate(allContacts.length, (index) {
+                        bool nodeIsGroup = allContacts[index]['isGroup'] == true;
+                        bool nodeIsLive = false;
+                        if (nodeIsGroup) {
+                           List<dynamic> m = allContacts[index]['members'] ?? [];
+                           nodeIsLive = m.any((phone) => _activeLiveContacts.contains(phone.toString()));
+                        } else {
+                           nodeIsLive = _activeLiveContacts.contains(allContacts[index]['phone']);
+                        }
+
+                        double animVal = CurvedAnimation(parent: _entranceController, curve: Interval((0.2 + (index * 0.08)).clamp(0.0, 1.0), (0.8 + (index * 0.05)).clamp(0.0, 1.0), curve: Curves.elasticOut)).value;
+
+                        int badgeCount = 0;
+                        String contactIdentifier = allContacts[index]['isGroup'] == true ? (allContacts[index]['name'] ?? "") : (allContacts[index]['phone'] ?? "");
+                        if (_isArchiveMode) {
+                          badgeCount = _allMessages.where((msg) => msg.isSaved && !msg.isDeleted && msg.contactName == contactIdentifier).length;
+                        } else {
+                          badgeCount = _allMessages.where((msg) => msg.contactName == contactIdentifier && !msg.isMe && !msg.isRead).length;
+                        }
+
+                        Map<String, dynamic> displayContact = Map.from(allContacts[index]);
+                        if (displayContact['isEmpty'] == true) {
+                          displayContact['name'] = _t('invite');
+                        }
+
+                        return OrbitContactNode(
+                          index: index, 
+                          contact: displayContact, 
+                          itemSpacingAngle: itemSpacingAngle, 
+                          scrollOffset: _scrollOffset, 
+                          menuX: menuX, 
+                          menuY: menuY, 
+                          orbitRadius: orbitRadius, 
+                          isLeftHanded: _isLeftHanded, 
+                          showSearchField: showSearchField, 
+                          searchQuery: _searchController.text, 
+                          activeIndex: activeIndex, 
+                          isLive: nodeIsLive, 
+                          anyLiveActive: anyLiveActive, 
+                          showConnectionArrows: _showConnectionArrows, 
+                          currentlyPlayingQueueItemSender: _currentlyPlayingQueueItemSender, 
+                          userName: _userName, 
+                          myCustomColor: _myCustomColor, 
+                          statusColor: allContacts[index]['status'] == UserStatus.offline ? Colors.redAccent : null,
+                          animVal: animVal, 
+                          
+                          unreadCount: badgeCount, 
+                          isMenuExpanded: anyMenuExpanded, 
+                          
+                          onOpenContacts: () => _openContacts(initialIndex: index),
+                          onSearchedPersonSelected: () => _onSearchedPersonSelected(allContacts[index]),
+                          onPersonSelected: () => _onPersonSelected(index),
+                          onRequestLiveConnection: () => _requestLiveConnection(index),
+                          
+                          onRemoveContact: () {}, 
+                          
+                          onNodeDragUpdate: (idx, offset) { 
+                            setState(() { _interactionNodeIndex = idx; _interactionNodeOffset = offset; }); 
+                          },
+                          onNodeInteractionEnded: (idx) { 
+                            setState(() { _interactionNodeIndex = -1; _interactionNodeOffset = 0.0; }); 
+                          },
+                          onNodeInteractionStarted: (idx) { setState(() { _interactionNodeIndex = idx; _interactionNodeOffset = 0.0; }); },
+                          incomingWaveBuilder: (i) {
+                            return ValueListenableBuilder<double>(
+                              valueListenable: _incomingAudioLevel,
+                              builder: (context, level, child) {
+                                double sizeMultiplier = 1.0 + (level * (0.6 + (i * 0.3)));
+                                return TweenAnimationBuilder(
+                                  key: ValueKey("incoming_$i"), tween: Tween(begin: 1.0, end: sizeMultiplier), duration: const Duration(milliseconds: 100),
+                                  builder: (context, double val, _) { return Container(width: 60 * val, height: 60 * val, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.greenAccent.withValues(alpha: (0.6 - (level * 0.3)).clamp(0.0, 1.0)), width: 1.5 + (level * 2)))); },
+                                );
+                              },
+                            );
+                          },
+                        );
+                      }).reversed,
+
+                      AnimatedPositioned(
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeOutCubic,
+                        right: !_isLeftHanded ? 8.0 : null, 
+                        left: _isLeftHanded ? 8.0 : null,
+                        top: menuY - 40, 
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 300),
+                          opacity: (activeIndex == -1 || allContacts[activeIndex]['isEmpty'] == true) && !showSearchField ? 1.0 : 0.0,
+                          child: IgnorePointer(
+                            ignoring: activeIndex != -1 || showSearchField,
+                            child: Column(
+                              crossAxisAlignment: !_isLeftHanded ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                              children: [
+                                Padding(
+                                  padding: EdgeInsets.only(right: !_isLeftHanded ? 12.0 : 0.0, left: _isLeftHanded ? 12.0 : 0.0),
+                                  child: GestureDetector(
+                                    onTap: () {
+                                       if (hapticEnabled) { try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ } }
+                                       setState(() => _isMenuExpanded = !_isMenuExpanded);
+                                    },
+                                    child: Container(
+                                      width: 55, height: 55,
+                                      decoration: BoxDecoration(
+                                        color: _isArchiveMode ? Colors.orangeAccent.withValues(alpha: 0.2) : Colors.white12,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(color: _isArchiveMode ? Colors.orangeAccent : Colors.white30, width: 2),
+                                        boxShadow: [if (_isArchiveMode) BoxShadow(color: Colors.orangeAccent.withValues(alpha: 0.4), blurRadius: 10)]
+                                      ),
+                                      child: Icon(_isMenuExpanded ? Icons.close : Icons.menu, color: _isArchiveMode ? Colors.orangeAccent : Colors.white, size: 28),
+                                    ),
+                                  ),
+                                ),
+                                AnimatedContainer(
+                                  duration: const Duration(milliseconds: 300),
+                                  curve: Curves.easeOutCubic,
+                                  height: _isMenuExpanded ? 240 : 0,
+                                  alignment: !_isLeftHanded ? Alignment.topRight : Alignment.topLeft,
+                                  child: RawScrollbar(
+                                    controller: _mainMenuScrollController,
+                                    thumbVisibility: true,
+                                    thumbColor: Colors.cyanAccent.withValues(alpha: 0.4),
+                                    radius: const Radius.circular(20),
+                                    thickness: 4,
+                                    crossAxisMargin: 0, 
+                                    child: SingleChildScrollView(
+                                      controller: _mainMenuScrollController,
+                                      physics: const BouncingScrollPhysics(),
+                                      child: Padding(
+                                        padding: EdgeInsets.only(right: !_isLeftHanded ? 12.0 : 0.0, left: _isLeftHanded ? 12.0 : 0.0),
+                                        child: Column(
+                                          crossAxisAlignment: !_isLeftHanded ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                          children: [
+                                            const SizedBox(height: 15),
+                                            _buildLabeledMenuBtn(Icons.search, Colors.cyanAccent, _t('search'), () { 
+                                                setState(() { 
+                                                    _isMenuExpanded = false;
+                                                    showSearchField = !showSearchField; 
+                                                    if (!showSearchField) { 
+                                                      _closeSearchMode(); 
+                                                    } else { 
+                                                      Future.delayed(const Duration(milliseconds: 150), () { 
+                                                        if (context.mounted) {
+                                                          FocusScope.of(context).requestFocus(_focusNode); 
+                                                        }
+                                                      }); 
+                                                    } 
+                                                }); 
+                                            }),
+                                            _buildLabeledMenuBtn(Icons.bookmark, _isArchiveMode ? Colors.orangeAccent : Colors.orangeAccent, _t('saved'), () { 
+                                                _toggleArchiveMode(); 
+                                            }),
+                                            _buildLabeledMenuBtn(Icons.person_add, Colors.greenAccent, _t('add_contact'), () { 
+                                                setState(() => _isMenuExpanded = false);
+                                                _openContacts(); 
+                                            }),
+                                            _buildLabeledMenuBtn(Icons.settings, Colors.grey, _t('settings'), () { 
+                                                setState(() => _isMenuExpanded = false);
+                                                _openSettings(); 
+                                            }),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      if (activeIndex != -1 && !showSearchField && allContacts[activeIndex]['isEmpty'] != true)
+                        AnimatedPositioned(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                          right: !_isLeftHanded ? 8.0 : null,
+                          left: _isLeftHanded ? 8.0 : null,
+                          top: menuY - 40, 
+                          child: AnimatedOpacity(
+                            duration: const Duration(milliseconds: 300),
+                            opacity: 1.0,
+                            child: Column(
+                              crossAxisAlignment: !_isLeftHanded ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                              children: [
+                                Padding(
+                                  padding: EdgeInsets.only(right: !_isLeftHanded ? 12.0 : 0.0, left: _isLeftHanded ? 12.0 : 0.0),
+                                  child: GestureDetector(
+                                    onTap: () {
+                                       if (hapticEnabled) { try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ } }
+                                       setState(() => _isActiveMenuExpanded = !_isActiveMenuExpanded);
+                                    },
+                                    child: Container(
+                                      width: 55, height: 55, 
+                                      decoration: BoxDecoration(
+                                        color: Colors.blueGrey.shade900.withValues(alpha: 0.6),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.5), width: 2), 
+                                      ),
+                                      child: Icon(_isActiveMenuExpanded ? Icons.close : Icons.more_vert, color: Colors.cyanAccent, size: 28), 
+                                    ),
+                                  ),
+                                ),
+                                AnimatedContainer(
+                                  duration: const Duration(milliseconds: 300),
+                                  curve: Curves.easeOutCubic,
+                                  height: _isActiveMenuExpanded ? 260.0 : 0.0, 
+                                  alignment: !_isLeftHanded ? Alignment.topRight : Alignment.topLeft,
+                                  child: RawScrollbar(
+                                    controller: _activeMenuScrollController,
+                                    thumbVisibility: true,
+                                    thumbColor: Colors.cyanAccent.withValues(alpha: 0.4),
+                                    radius: const Radius.circular(20),
+                                    thickness: 4,
+                                    crossAxisMargin: 0,
+                                    child: SingleChildScrollView(
+                                      controller: _activeMenuScrollController,
+                                      physics: const BouncingScrollPhysics(), 
+                                      child: Padding(
+                                        padding: EdgeInsets.only(right: !_isLeftHanded ? 12.0 : 0.0, left: _isLeftHanded ? 12.0 : 0.0),
+                                        child: Column(
+                                          crossAxisAlignment: !_isLeftHanded ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                          children: [
+                                            const SizedBox(height: 15),
+                                            
+                                            if (isGroup) 
+                                              _buildLabeledMenuBtn(Icons.touch_app, Colors.orangeAccent, _t('nudge_grp'), () {
+                                                  setState(() => _isActiveMenuExpanded = false);
+                                                  _openSubOrbit(SubOrbitType.nudge);
+                                              }),
+                                              
+                                            _buildLabeledMenuBtn(Icons.add_reaction, Colors.pinkAccent, _t('send_react'), () { 
+                                                setState(() => _isActiveMenuExpanded = false);
+                                                _openSubOrbit(SubOrbitType.emojis); 
+                                            }),
+                                            
+                                            _buildLabeledMenuBtn(Icons.graphic_eq, Colors.cyanAccent, _t('voice_fx'), () { 
+                                                setState(() => _isActiveMenuExpanded = false);
+                                                _openSubOrbit(SubOrbitType.effects); 
+                                            }),
+                                            
+                                            _buildLabeledMenuBtn(Icons.thumb_up, Colors.greenAccent, _t('roger'), () {
+                                               setState(() => _isActiveMenuExpanded = false);
+                                               _triggerReaction("👍");
+                                               if (hapticEnabled) { try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ } }
+                                               if (isGroup) {
+                                                 List<dynamic> members = allContacts[activeIndex]['members'] ?? [];
+                                                 for (var m in members) {
+                                                   SocketService().sendRogerThat(m.toString(), _currentUserPhone!, _userName);
+                                                 }
+                                               } else {
+                                                 SocketService().sendRogerThat(allContacts[activeIndex]['phone'], _currentUserPhone!, _userName);
+                                               }
+                                               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('roger_sent'))));
+                                            }),
+                                            
+                                            _buildLabeledMenuBtn(_showOnlyUnread ? Icons.filter_list_off : Icons.filter_list, Colors.amber, _t('filter'), () {
+                                                setState(() {
+                                                  _showOnlyUnread = !_showOnlyUnread;
+                                                  _isActiveMenuExpanded = false;
+                                                });
+                                                if (hapticEnabled) { try { HapticFeedback.lightImpact(); } catch (_) { /* ignore */ } }
+                                            }),
+                                            
+                                            _buildLabeledMenuBtn(_mutedContacts.contains(activeContactName) ? Icons.volume_off : Icons.volume_up, Colors.purpleAccent, _mutedContacts.contains(activeContactName) ? _t('unmute') : _t('mute'), () {
+                                                setState(() {
+                                                  if (_mutedContacts.contains(activeContactName)) { 
+                                                    _mutedContacts.remove(activeContactName); 
+                                                  } else { 
+                                                    _mutedContacts.add(activeContactName); 
+                                                  }
+                                                  _isActiveMenuExpanded = false;
+                                                });
+                                            }),
+                                            
+                                            _buildLabeledMenuBtn(_blockedContacts.contains(activeContactName) ? Icons.block : Icons.check_circle_outline, Colors.deepOrange, _blockedContacts.contains(activeContactName) ? _t('unblock') : _t('block'), () {
+                                                setState(() {
+                                                  if (_blockedContacts.contains(activeContactName)) { 
+                                                    _blockedContacts.remove(activeContactName); 
+                                                  } else { 
+                                                    _blockedContacts.add(activeContactName); 
+                                                    if (isCurrentlyLive) { _endLiveConnection(); } 
+                                                  }
+                                                  _isActiveMenuExpanded = false;
+                                                });
+                                            }),
+                                            
+                                            _buildLabeledMenuBtn(Icons.delete_outline, Colors.redAccent, _t('rm_orbit'), () {
+                                                setState(() => _isActiveMenuExpanded = false);
+                                                _promptDeleteActiveContact();
+                                            }),
+                                            const SizedBox(height: 12), 
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                      AnimatedPositioned(
+                        duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic, left: !_isLeftHanded ? 30.0 : null, right: _isLeftHanded ? 30.0 : null, top: menuY - 270,
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 300), opacity: (showSearchField || activeIndex == -1 || _replyingToMessage == null) ? 0.0 : 1.0,
+                          child: IgnorePointer(
+                            ignoring: showSearchField || activeIndex == -1 || _replyingToMessage == null,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(color: Colors.blueGrey.shade900.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.5))),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.reply, size: 12, color: Colors.blueAccent), const SizedBox(width: 6),
+                                  // 🟢 DÜZELTME: Metin birleştirme interpolation kullanılarak düzeltildi.
+                                  Text("${_t('replying')}${_formatDuration(_replyingToMessage?.durationInSeconds ?? 0)}", style: const TextStyle(fontSize: 10, color: Colors.white70)), const SizedBox(width: 8),
+                                  GestureDetector(onTap: () => setState(() => _replyingToMessage = null), child: const Icon(Icons.close, size: 12, color: Colors.white54))
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          ignoring: !(_isIncomingCallActive || isRecording),
+                          child: AnimatedOpacity(
+                            duration: const Duration(milliseconds: 300), 
+                            opacity: (_isIncomingCallActive || isRecording) ? 0.75 : 0.0, 
+                            child: Container(color: Colors.black)
+                          ),
+                        ),
+                      ),
+
+                      Positioned(
+                        left: menuX - 162.5, top: menuY - 162.5, 
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 300), 
+                          opacity: (showSearchField || anyMenuExpanded) ? 0.15 : 1.0,
+                          child: Transform.scale(
+                            scale: 1.1,
+                            child: IgnorePointer(
+                              ignoring: showSearchField || anyMenuExpanded, 
+                              child: OrbitPttArea(
+                                isIncomingCallActive: _isIncomingCallActive,
+                                isRecording: isRecording, isCancelled: _isCancelled, isWaitingForLiveApproval: isWaitingForLiveApproval, isLive: anyLiveActive, isLeftHanded: _isLeftHanded, dragOffset: _dragOffset, dragVerticalOffset: _dragVerticalOffset, pttSlideOffset: _pttSlideOffset, hapticRejectPulseController: _hapticRejectPulseController, hapticAcceptPulseController: _hapticAcceptPulseController, entranceController: _entranceController, pulseController: _pulseController, audioLevel: _audioLevel, recordDurationText: _formatDuration(_recordDuration),
+                                isNodeBeingPulledInward: _interactionNodeIndex != -1 && _interactionNodeOffset <= -50,
+                                onPointerDown: isWaitingForLiveApproval ? (_) {} : (_) { if (!_isIncomingCallActive) _startRecording(); },
+                                onPointerMove: (details) { if (_isIncomingCallActive) { setState(() { _pttSlideOffset += details.delta.dx; _pttSlideOffset = _pttSlideOffset.clamp(-100.0, 100.0); }); } else { _updateRecordingPointer(details); } },
+                                onPointerUp: (_) {
+                                  if (_isIncomingCallActive) {
+                                    if (_pttSlideOffset > 70) {
+                                      _acceptIncomingCall(); 
+                                    } else if (_pttSlideOffset < -70) {
+                                      _rejectIncomingCall(); 
+                                    } else {
+                                      setState(() { _pttSlideOffset = 0.0; });
+                                    }
+                                  } else { 
+                                    _stopRecording(); 
+                                  }
+                                },
+                                onPointerCancel: (_) { if (_isIncomingCallActive) { setState(() { _pttSlideOffset = 0.0; }); } else { _stopRecording(); } },
+                                onTapCancelCall: () { if (isWaitingForLiveApproval) _cancelOutgoingCall(); },
+                                buildCallingWave: (index) {
+                                  return AnimatedBuilder(
+                                    animation: _breatheController,
+                                    builder: (context, child) {
+                                      double sizeMultiplier = 1.0 + (_breatheController.value * (0.3 + (index * 0.2)));
+                                      return Container(width: 117 * sizeMultiplier, height: 117 * sizeMultiplier, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.redAccent.withValues(alpha: (0.3 - (_breatheController.value * 0.2)).clamp(0.0, 1.0)), width: 2.0)));
+                                    }
+                                  );
+                                }, 
+                                buildRealWave: (index) {
+                                  return ValueListenableBuilder<double>(
+                                    valueListenable: _audioLevel,
+                                    builder: (context, level, child) {
+                                      double sizeMultiplier = 1.0 + (level * (1.2 + (index * 0.4)));
+                                      return TweenAnimationBuilder(
+                                        key: ValueKey(index), tween: Tween(begin: 1.0, end: sizeMultiplier), duration: const Duration(milliseconds: 100),
+                                        builder: (context, double val, _) { return Container(width: 117 * val, height: 117 * val, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.redAccent.withValues(alpha: (0.4 - (level * 0.2)).clamp(0.1, 1.0)), width: 2 + (level * 2)))); },
+                                      );
+                                    },
+                                  );
+                                },
+                              )
+                            )
+                          ),
+                        ),
+                      ),
+
+                      if (_activeSubOrbit != SubOrbitType.none)
+                        Positioned.fill(
+                          child: GestureDetector(
+                            onTap: () => setState(() => _activeSubOrbit = SubOrbitType.none),
+                            onVerticalDragUpdate: (details) {
+                              setState(() {
+                                double maxSubScroll = (_getSubOrbitItems().length * itemSpacingAngle) - (4 * itemSpacingAngle);
+                                if (maxSubScroll < 0) {
+                                  maxSubScroll = 0;
+                                }
+                                _subOrbitScrollOffset -= details.delta.dy * 0.005;
+                                if (_subOrbitScrollOffset < -0.2) {
+                                  _subOrbitScrollOffset = -0.2;
+                                }
+                                if (_subOrbitScrollOffset > maxSubScroll) {
+                                  _subOrbitScrollOffset = maxSubScroll;
+                                }
+                              });
+                            },
+                            child: Container(
+                              color: Colors.black.withValues(alpha: 0.7),
+                              child: BackdropFilter(
+                                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                                child: Stack(
+                                  children: [
+                                    Positioned(
+                                      top: menuY - 140,
+                                      left: 0, right: 0,
+                                      child: Center(
+                                        child: Text(
+                                          _activeSubOrbit == SubOrbitType.effects ? _t('choose_fx') :
+                                          _activeSubOrbit == SubOrbitType.emojis ? _t('send_re_title') : _t('nudge_grp_title'),
+                                          style: const TextStyle(color: Colors.white70, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 2.0),
+                                        ),
+                                      ),
+                                    ),
+                                    ...List.generate(_getSubOrbitItems().length, (index) {
+                                      final items = _getSubOrbitItems();
+                                      return OrbitSubItemNode(
+                                        index: index,
+                                        item: items[index],
+                                        itemSpacingAngle: itemSpacingAngle,
+                                        scrollOffset: _subOrbitScrollOffset,
+                                        menuX: menuX,
+                                        menuY: menuY,
+                                        orbitRadius: orbitRadius,
+                                        isLeftHanded: _isLeftHanded,
+                                        onTap: () => _onSubItemTapped(items[index]),
+                                      );
+                                    }).reversed,
+                                    
+                                    if (_activeSubOrbit == SubOrbitType.nudge)
+                                      Positioned(
+                                        left: menuX - 55, top: menuY - 55,
+                                        child: GestureDetector(
+                                          onTap: () {
+                                            if (hapticEnabled) { try { HapticFeedback.heavyImpact(); } catch (_) { /* ignore */ } }
+                                            List<dynamic> members = allContacts[activeIndex]['members'] ?? [];
+                                            for(var m in members) {
+                                              SocketService().sendNudge(m.toString(), _currentUserPhone!, _userName);
+                                            }
+                                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('all_nudged'))));
+                                            setState(() => _activeSubOrbit = SubOrbitType.none);
+                                          },
+                                          child: Container(
+                                            width: 110, height: 110,
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: Colors.orange.withValues(alpha: 0.15),
+                                              border: Border.all(color: Colors.orangeAccent, width: 2),
+                                              boxShadow: [BoxShadow(color: Colors.orangeAccent.withValues(alpha: 0.3), blurRadius: 15)]
+                                            ),
+                                            child: Column(
+                                              mainAxisAlignment: MainAxisAlignment.center,
+                                              children: [
+                                                const Icon(Icons.groups, color: Colors.orangeAccent, size: 32),
+                                                const SizedBox(height: 4),
+                                                Text(_t('nudge_all'), textAlign: TextAlign.center, style: const TextStyle(color: Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold))
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                      if (showSearchField)
+                        Positioned(
+                          top: menuY - 250, 
+                          left: _isLeftHanded ? null : 30, right: _isLeftHanded ? 30 : null,
+                          child: AnimatedSwitcher(duration: const Duration(milliseconds: 300), child: OrbitSearchField(controller: _searchController, focusNode: _focusNode, onChanged: _handleSearch, onClear: () { _searchController.clear(); _handleSearch(""); })),
+                        ),
+                      
+                      if (!showSearchField && _activeSubOrbit == SubOrbitType.none)
+                        Positioned(
+                          left: !_isLeftHanded ? 20.0 : null, right: _isLeftHanded ? 20.0 : null, top: menuY - 150,
+                          child: GhostHandToggle(isLeftHanded: _isLeftHanded, onToggle: () { 
+                            setState(() { _isLeftHanded = !_isLeftHanded; }); 
+                            if (hapticEnabled) { try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ } }
+                          },),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            }
+          );
+        }
+      )
     );
   }
 }
 
-class _GhostArrowPainter extends CustomPainter {
-  final bool isLeftHanded;
+class FlyingEmoji {
+  final String id;
+  final String emoji;
+  final double startX;
+  final String? senderName;
 
-  _GhostArrowPainter({required this.isLeftHanded});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 2.0 
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    final path = Path();
-    
-    double startX = isLeftHanded ? 0.0 : size.width;
-    double apexX = isLeftHanded ? size.width : 0.0;
-    double midY = size.height / 2;
-
-    path.moveTo(startX, midY - 110); 
-    path.lineTo(apexX, midY); 
-    path.lineTo(startX, midY + 110);
-
-    canvas.drawPath(path, paint..maskFilter = const MaskFilter.blur(BlurStyle.solid, 3));
-    canvas.drawPath(path, paint..maskFilter = null);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
+  FlyingEmoji({
+    required this.id,
+    required this.emoji,
+    required this.startX,
+    this.senderName,
+  });
+} 

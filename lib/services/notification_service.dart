@@ -1,96 +1,148 @@
+import 'package:flutter/foundation.dart'; 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class NotificationService {
-  // Singleton Pattern - Servisi her yerden tek bir kopyayla çağırabilmek için
   static final NotificationService _instance = NotificationService._internal();
   factory NotificationService() => _instance;
   NotificationService._internal();
 
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
+  static Function(String)? onNotificationTapped;
+
   Future<void> init() async {
-    // 1. Android için ikon ayarı (@mipmap/ic_launcher varsayılan uygulama ikonudur)
-    const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
+    try {
+      const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
 
-    // 2. iOS için başlangıç ayarları
-    const DarwinInitializationSettings initializationSettingsIOS = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-    );
+      const DarwinInitializationSettings initializationSettingsIOS = DarwinInitializationSettings(
+        requestAlertPermission: true,
+        requestBadgePermission: true,
+        requestSoundPermission: true,
+      );
 
-    const InitializationSettings initializationSettings = InitializationSettings(
-      android: initializationSettingsAndroid,
-      iOS: initializationSettingsIOS,
-    );
+      const InitializationSettings initializationSettings = InitializationSettings(
+        android: initializationSettingsAndroid,
+        iOS: initializationSettingsIOS,
+      );
 
-    // 🟢 HATA ÇÖZÜMÜ: Parametre adı 'settings' olarak belirtildi
-    await flutterLocalNotificationsPlugin.initialize(
-      settings: initializationSettings,
-    );
+      await flutterLocalNotificationsPlugin.initialize(
+        settings: initializationSettings, 
+        onDidReceiveNotificationResponse: (NotificationResponse response) {
+          if (response.payload != null && onNotificationTapped != null) {
+            onNotificationTapped!(response.payload!);
+          }
+        },
+      );
+
+      await flutterLocalNotificationsPlugin
+          .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
+          ?.requestPermissions(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
+    } catch (e) {
+      debugPrint("Bildirim başlatma hatası: $e");
+    }
   }
 
-  // 🔊 NORMAL SESLİ MESAJ BİLDİRİMİ (Sessizce üstten düşer)
+  Future<void> checkForLaunchNotification() async {
+    try {
+      final NotificationAppLaunchDetails? launchDetails = await flutterLocalNotificationsPlugin.getNotificationAppLaunchDetails();
+      if (launchDetails != null && launchDetails.didNotificationLaunchApp) {
+        final response = launchDetails.notificationResponse;
+        if (response != null && response.payload != null && onNotificationTapped != null) {
+          onNotificationTapped!(response.payload!);
+        }
+      }
+    } catch(e) {
+      debugPrint("Kapalıyken açılma bildirimi hatası: $e");
+    }
+  }
+
   Future<void> showMessageNotification(String senderName) async {
-    const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
-      'orbit_message_channel', // Kanal ID
-      'Sesli Mesajlar', // Kullanıcının ayarlarda göreceği isim
-      channelDescription: 'Yeni bir telsiz mesajı geldiğinde çalar.',
-      importance: Importance.defaultImportance,
-      priority: Priority.defaultPriority,
-      icon: '@mipmap/ic_launcher',
-    );
+    try {
+      const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+        'orbit_message_channel_v1', 
+        'Sesli Mesajlar', 
+        channelDescription: 'Yeni bir telsiz mesajı geldiğinde çalar.',
+        importance: Importance.defaultImportance,
+        priority: Priority.defaultPriority,
+        icon: '@mipmap/ic_launcher',
+      );
 
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
-      android: androidPlatformChannelSpecifics,
-      iOS: DarwinNotificationDetails(),
-    );
+      const NotificationDetails platformChannelSpecifics = NotificationDetails(
+        android: androidPlatformChannelSpecifics,
+        iOS: DarwinNotificationDetails(),
+      );
 
-    // 🟢 HATA ÇÖZÜMÜ: Parametre adları (id, title, body) eklendi
-    await flutterLocalNotificationsPlugin.show(
-      id: 0, 
-      title: 'Yeni Sesli Mesaj',
-      body: '$senderName sana bir telsiz mesajı bıraktı.',
-      notificationDetails: platformChannelSpecifics,
-    );
+      await flutterLocalNotificationsPlugin.show(
+        id: 0, 
+        title: 'Yeni Sesli Mesaj',
+        body: '$senderName sana bir telsiz mesajı bıraktı.',
+        notificationDetails: platformChannelSpecifics,
+        payload: 'message', 
+      );
+    } catch (e) {
+      debugPrint("Mesaj bildirimi hatası: $e");
+    }
   }
 
-  // 🚨 CANLI ARAMA BİLDİRİMİ (Telefonu titretir, Max öncelikle ekrana fırlar)
-  Future<void> showCallNotification(String callerName) async {
-    const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
-      'orbit_call_channel', 
-      'Canlı Aramalar', 
-      channelDescription: 'Biri size telsizden canlı bağlanmak istediğinde çalar.',
-      importance: Importance.max, // MAX önem!
-      priority: Priority.high,    // Yüksek öncelik (Kilit ekranında bile görünür)
-      enableVibration: true,
-      playSound: true,
-      icon: '@mipmap/ic_launcher',
-      fullScreenIntent: true, // Ekranı uyandırmak için kritik!
-    );
+  // 🚀 DÜZELTME: Artık 'soundName' parametresi alabiliyor (Örn: 'siren', 'radar' veya boş bırakılırsa varsayılan)
+  Future<void> showCallNotification(String callerId, String callerName, {String? soundName}) async {
+    try {
+      // Android'de ses değiştirmek için Kanal ID'sinin farklı olması gerekir. O yüzden dinamik yaptık.
+      String channelId = 'orbit_call_channel_${soundName ?? "default"}';
 
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
-      android: androidPlatformChannelSpecifics,
-      iOS: DarwinNotificationDetails(
-        presentAlert: true,
-        presentBadge: true,
-        presentSound: true,
-        interruptionLevel: InterruptionLevel.timeSensitive, // iOS'ta rahatsız etme modunu deler
-      ),
-    );
+      AndroidNotificationSound? androidSound;
+      if (soundName != null && soundName.isNotEmpty) {
+         // Android için sesi 'android/app/src/main/res/raw/' klasöründen çekecek
+         androidSound = RawResourceAndroidNotificationSound(soundName);
+      }
 
-    // 🟢 HATA ÇÖZÜMÜ: Parametre adları (id, title, body) eklendi
-    await flutterLocalNotificationsPlugin.show(
-      id: 1, 
-      title: 'Telsiz Çağrısı',
-      body: '📞 $callerName canlı bağlantı istiyor...',
-      notificationDetails: platformChannelSpecifics,
-    );
+      final AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+        channelId, 
+        'Canlı Aramalar (${soundName ?? "Standart"})', 
+        channelDescription: 'Canlı bağlantı istekleri.',
+        importance: Importance.max, 
+        priority: Priority.high,    
+        enableVibration: true,
+        playSound: true,
+        sound: androidSound, // 🟢 Dinamik Özel Ses
+        icon: '@mipmap/ic_launcher',
+        category: AndroidNotificationCategory.call, 
+        // 🚀 BÜYÜK HİLE (FLAG_INSISTENT): Bu 4 rakamı, bildirimin sen açana kadar susmamasını (loop) sağlar!
+        additionalFlags: Int32List.fromList(<int>[4]), 
+      );
+
+      final NotificationDetails platformChannelSpecifics = NotificationDetails(
+        android: androidPlatformChannelSpecifics,
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: true,
+          sound: soundName != null ? '$soundName.wav' : null, // 🟢 iOS Özel Sesi
+          interruptionLevel: InterruptionLevel.timeSensitive, 
+        ),
+      );
+
+      await flutterLocalNotificationsPlugin.show(
+        id: 1, 
+        title: 'Telsiz Çağrısı',
+        body: '📞 $callerName canlı bağlantı istiyor...',
+        notificationDetails: platformChannelSpecifics,
+        payload: 'call_$callerId', 
+      );
+    } catch (e) {
+      debugPrint("Arama bildirimi hatası: $e");
+    }
   }
 
-  // Çağrı iptal olursa veya reddedilirse ekranda asılı kalan bildirimi silmek için
   Future<void> cancelCallNotification() async {
-    // 🟢 HATA ÇÖZÜMÜ: 'id' parametre adı eklendi
-    await flutterLocalNotificationsPlugin.cancel(id: 1); 
+    try {
+      await flutterLocalNotificationsPlugin.cancel(id: 1); 
+    } catch (e) {
+      debugPrint("Bildirim iptal hatası: $e");
+    }
   }
 }
