@@ -70,7 +70,7 @@ class OrbitSubItemNode extends StatelessWidget {
 
     double globalAngle = math.atan2(yOffset, xOffset);
     
-    String name = item['name'] ?? '';
+    String name = item['translatedName'] ?? item['name'] ?? '';
     if (name.length > 10) {
       name = name.substring(0, 10);
     }

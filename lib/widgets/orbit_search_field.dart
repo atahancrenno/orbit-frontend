@@ -5,6 +5,7 @@ class OrbitSearchField extends StatelessWidget {
   final FocusNode focusNode;
   final Function(String) onChanged;
   final VoidCallback onClear;
+  final String hintText;
 
   const OrbitSearchField({
     super.key,
@@ -12,6 +13,7 @@ class OrbitSearchField extends StatelessWidget {
     required this.focusNode,
     required this.onChanged,
     required this.onClear,
+    required this.hintText,
   });
 
   @override
@@ -37,7 +39,7 @@ class OrbitSearchField extends StatelessWidget {
             cursorColor: Colors.cyanAccent,
             style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: 1.0),
             decoration: InputDecoration(
-              hintText: "Orbitte Ara...", 
+              hintText: hintText, 
               hintStyle: TextStyle(color: Colors.cyanAccent.withValues(alpha: 0.4), fontStyle: FontStyle.italic), 
               border: InputBorder.none,
               prefixIcon: const Icon(Icons.saved_search, color: Colors.cyanAccent, size: 22),

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'orbit_main_screen.dart';
 
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -24,19 +25,25 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
   String _verificationId = "";
   
-  // 🟢 DİL SEÇENEĞİ (Default tr)
+  // 🟢 DİL SEÇENEĞİ
   String _currentLang = 'tr'; 
 
+  // 🟢 12 DİLLİ TAM SET
   final Map<String, String> _langNames = {
     'tr': '🇹🇷 TR',
     'en': '🇬🇧 EN',
     'es': '🇪🇸 ES',
     'ar': '🇸🇦 AR',
     'de': '🇩🇪 DE',
-    'ru': '🇷🇺 RU'
+    'ru': '🇷🇺 RU',
+    'fr': '🇫🇷 FR',
+    'it': '🇮🇹 IT',
+    'nl': '🇳🇱 NL',
+    'az': '🇦🇿 AZ',
+    'zh': '🇨🇳 ZH',
+    'hi': '🇮🇳 HI'
   };
 
-  // 🟢 ÇEVİRİ SÖZLÜĞÜ (Login)
   final Map<String, Map<String, String>> _texts = {
     'sec_lock': {'tr': 'Güvenlik Kilidi Devrede', 'en': 'Security Lock Active', 'es': 'Bloqueo de seguridad activo', 'ar': 'قفل الأمان نشط', 'de': 'Sicherheitssperre aktiv', 'ru': 'Блокировка безопасности активна'},
     'enter_code': {'tr': 'Lütfen onay kodunu girin.', 'en': 'Please enter the confirmation code.', 'es': 'Introduzca el código de confirmación.', 'ar': 'الرجاء إدخال رمز التأكيد.', 'de': 'Bitte Bestätigungscode eingeben.', 'ru': 'Введите код подтверждения.'},
@@ -239,25 +246,46 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     }
   }
 
+  // 🚀 RADAR VE FİLTRE EKLENMİŞ SMS İSTEK FONKSİYONU
   Future<void> _requestOtp() async {
-    if (_isBlocked) return;
+   debugPrint ("🚀 DİKKAT: 'Kod Gönder' butonuna basıldı!");
+
+    if (_isBlocked) {
+      debugPrint("🛑 HATA: Sistem bloke edilmiş durumda.");
+      return;
+    }
     
-    final rawPhone = _phoneController.text.trim();
+    // 1. Boşlukları temizle
+    String rawPhone = _phoneController.text.trim().replaceAll(' ', '');
+    debugPrint("📱 Kullanıcının girdiği ham numara: $rawPhone");
+
+    // 2. Eğer başta '0' varsa kes at (Sessiz hatayı önler)
+    if (rawPhone.startsWith('0')) {
+      rawPhone = rawPhone.substring(1);
+      debugPrint("✂️ Baştaki sıfır temizlendi. Yeni numara: $rawPhone");
+    }
+
     if (rawPhone.isEmpty || rawPhone.length < 9) { 
+      debugPrint("🛑 HATA: Numara çok kısa! Ekrana hata yazdırılıyor.");
       setState(() => _errorMessage = _t('valid_phone')); 
       return; 
     }
     
     setState(() { _isLoading = true; _errorMessage = ""; });
-    final fullPhone = "$_selectedCountryCode$rawPhone".replaceAll(' ', '');
+    
+    // 3. Ülke koduyla birleştir
+    final fullPhone = "$_selectedCountryCode$rawPhone";
+    debugPrint("🔥 Firebase'e Gönderilen Tam Numara: $fullPhone");
 
     try {
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: fullPhone,
         verificationCompleted: (PhoneAuthCredential credential) async {
+          debugPrint("✅ Otomatik Doğrulama Başarılı! (SMS okundu)");
           await _signInWithFirebase(credential);
         },
         verificationFailed: (FirebaseAuthException e) {
+          debugPrint("❌ FIREBASE HATASI PATLADI! Kod: ${e.code} - Mesaj: ${e.message}");
           if (mounted) {
             setState(() {
               _isLoading = false;
@@ -272,6 +300,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           }
         },
         codeSent: (String verificationId, int? resendToken) {
+          debugPrint("📨 BAŞARILI! KOD GÖNDERİLDİ! Doğrulama ID alındı.");
           if (mounted) {
             setState(() {
               _verificationId = verificationId;
@@ -282,10 +311,12 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           }
         },
         codeAutoRetrievalTimeout: (String verificationId) {
+          debugPrint("⏱️ Otomatik yakalama zaman aşımı (Beklenen bir durum).");
           _verificationId = verificationId;
         },
       );
     } catch (e) {
+      debugPrint("💥 BEKLENMEYEN UYGULAMA HATASI: $e");
       if (mounted) {
         setState(() { _errorMessage = _t('unexpected_error'); _isLoading = false; });
       }
@@ -293,6 +324,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   }
 
   Future<void> _verifyOtp() async {
+    debugPrint("🎯 DİKKAT: 'Giriş Yap' (Kodu Doğrula) butonuna basıldı!");
     if (_isBlocked) return;
     
     final otp = _otpController.text.trim();
@@ -304,12 +336,14 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     setState(() { _isLoading = true; _errorMessage = ""; });
 
     try {
+      debugPrint("🔐 Kod Firebase'e gönderiliyor...");
       PhoneAuthCredential credential = PhoneAuthProvider.credential(
         verificationId: _verificationId,
         smsCode: otp,
       );
       await _signInWithFirebase(credential);
     } on FirebaseAuthException catch (e) {
+      debugPrint("❌ KOD DOĞRULAMA HATASI: ${e.code}");
       await _recordAttempt();
       if (!_isBlocked && mounted) {
         setState(() {
@@ -328,6 +362,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       User? firebaseUser = userCredential.user;
 
       if (firebaseUser != null) {
+        debugPrint("✅ FIREBASE GİRİŞİ BAŞARILI! Backend'e bilet onayı için gidiliyor...");
         await _resetSecurityData();
         
         String? idToken = await firebaseUser.getIdToken();
@@ -341,6 +376,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           );
 
           if (response.statusCode == 200) {
+            debugPrint("🛂 BACKEND ONAYLADI! Bilet alındı, ana ekrana geçiliyor.");
             final data = json.decode(response.body);
             final String jwtToken = data['token']; 
             
@@ -352,6 +388,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
             
             Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const OrbitMainScreen()));
           } else {
+            debugPrint("🛑 BACKEND REDDETTİ! Durum Kodu: ${response.statusCode}");
             if (mounted) {
               setState(() { _isLoading = false; _errorMessage = _t('server_rejected'); });
             }
@@ -360,6 +397,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         }
       }
     } catch (e) {
+      debugPrint("💥 SİSTEME GİRİŞ HATASI (Firebase Sign-in): $e");
       if (mounted) {
         setState(() { _isLoading = false; _errorMessage = _t('system_login_failed'); });
       }
@@ -377,10 +415,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         body: SafeArea(
           child: Stack(
             children: [
-              // 🟢 ANA İÇERİK (ÜST KISIM: ESNEK VE KAYDIRILABİLİR, ALT KISIM: SABİT)
+              // 🟢 ANA İÇERİK
               Column(
                 children: [
-                  // --- ESNEK VE KAYDIRILABİLİR ALAN ---
                   Expanded(
                     child: LayoutBuilder(
                       builder: (context, constraints) {
@@ -393,7 +430,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  const SizedBox(height: 60), // Dil butonu için boşluk
+                                  const SizedBox(height: 60), 
                                   
                                   AnimatedBuilder(
                                     animation: _logoAnimationController,
@@ -567,7 +604,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                     ],
                                   ],
                                   
-                                  const SizedBox(height: 20), // Alt kısımla mesafe
+                                  const SizedBox(height: 20), 
                                 ],
                               ),
                             ),
@@ -577,11 +614,11 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                     ),
                   ),
 
-                  // --- 🟢 SABİT AKSİYON ALANI (KLAVYE ÜSTÜNDE KALIR) ---
+                  // 🟢 SABİT AKSİYON ALANI
                   if (!_isBlocked)
                     Container(
                       padding: const EdgeInsets.only(left: 30, right: 30, bottom: 20, top: 10),
-                      color: Colors.black, // Klavye arkası rengiyle bütünleşik
+                      color: Colors.black, 
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -625,7 +662,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                 ],
               ),
 
-              // 🟢 DİL SEÇİMİ POPUP (Üstte Sabit)
+              // 🟢 DİL SEÇİMİ POPUP
               Positioned(
                 top: 10,
                 right: layoutDirection == TextDirection.ltr ? 20 : null,

@@ -6,8 +6,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:audioplayers/audioplayers.dart'; 
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_html/flutter_html.dart'; // Ekledik
-import '../constants/legal_texts.dart'; // Ekledik
+import 'package:flutter_html/flutter_html.dart'; 
+import '../constants/legal_texts.dart'; 
+
+// 🟢 DOSYA YOLU DÜZELTİLDİ (screens klasörünün içinde aranacak)
+import '../screens/orbit_plus_screen.dart'; 
 
 class SettingsBottomSheet extends StatefulWidget {
   final String userName;
@@ -124,6 +127,15 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
     Colors.orangeAccent, Colors.greenAccent.shade700, Colors.tealAccent.shade700
   ];
 
+  // 🟢 PREMIUM TEMALAR LİSTESİ
+  final List<Map<String, dynamic>> _plusThemes = [
+    {'name': 'Neon Siberpunk', 'colors': [Colors.pinkAccent, Colors.cyanAccent]},
+    {'name': 'Midnight Gold', 'colors': [Colors.black87, Colors.amber]},
+    {'name': 'Galaksi', 'colors': [Colors.deepPurple, Colors.indigo.shade900]},
+    {'name': 'Buzlu Cam', 'colors': [Colors.white54, Colors.lightBlueAccent.withValues(alpha: 0.5)]},
+    {'name': 'Gece Operasyonu', 'colors': [Colors.green.shade900, Colors.black]},
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -164,36 +176,43 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
     await prefs.setString('app_lang', langCode);
   }
 
-  // 🟢 HIZLI ÇEVİRİ SÖZLÜĞÜ (AYARLAR İÇİN TAM ÇEVİRİ)
   String _t(String key) {
     const Map<String, Map<String, String>> dict = {
       'title': {'tr': 'Orbit Sistem Ayarları', 'en': 'Orbit System Settings', 'de': 'Orbit Systemeinstellungen', 'ru': 'Системные настройки Orbit', 'es': 'Configuración del sistema Orbit', 'ar': 'إعدادات نظام Orbit'},
       'lang': {'tr': 'Uygulama Dili', 'en': 'App Language', 'de': 'App-Sprache', 'ru': 'Язык приложения', 'es': 'Idioma de la aplicación', 'ar': 'لغة التطبيق'},
-      'prof': {'tr': 'Profil ve Durum', 'en': 'Profile & Status', 'de': 'Profil & Status', 'ru': 'Профиль и статус', 'es': 'Perfil y estado', 'ar': 'الملف الشخصi والحالة'},
+      'prof': {'tr': 'Profil ve Durum', 'en': 'Profile & Status', 'de': 'Profil & Status', 'ru': 'Профиль и статус', 'es': 'Perfil y estado', 'ar': 'الملف الشخصي والحالة'},
       'app': {'tr': 'Görünüm ve Arayüz', 'en': 'Appearance & UI', 'de': 'Erscheinungsbild & UI', 'ru': 'Внешний вид и интерфейс', 'es': 'Apariencia e interfaz de usuario', 'ar': 'المظهر وواجهة المستخدم'},
       'aud': {'tr': 'Ses ve Donanım', 'en': 'Audio & Hardware', 'de': 'Audio & Hardware', 'ru': 'Аудио и оборудование', 'es': 'Audio y Hardware', 'ar': 'الصوت والأجهزة'},
       'priv': {'tr': 'Gizlilik ve Güvenlik', 'en': 'Privacy & Security', 'de': 'Datenschutz & Sicherheit', 'ru': 'Конфиденциальность и безопасность', 'es': 'Privacidad y seguridad', 'ar': 'الخصوصية والأمان'},
       'perm': {'tr': 'İzinler ve Yasal', 'en': 'Permissions & Legal', 'de': 'Berechtigungen & Rechtliches', 'ru': 'Разрешения и правовые вопросы', 'es': 'Permisos y legalidad', 'ar': 'الأذونات والقانونية'},
       'notif': {'tr': 'Bildirimler', 'en': 'Notifications', 'de': 'Benachrichtigungen', 'ru': 'Уведомления', 'es': 'Notificaciones', 'ar': 'الإشعارات'},
       'stor': {'tr': 'Depolama ve Veri', 'en': 'Storage & Data', 'de': 'Speicher & Daten', 'ru': 'Хранилище и данные', 'es': 'Almacenamiento y datos', 'ar': 'التخزين والبيانات'},
-      'acc': {'tr': 'Hesap Yönetimi', 'en': 'Account Management', 'de': 'Kontoverwaltung', 'ru': 'Управление аккаuntom', 'es': 'Gestión de cuentas', 'ar': 'إدارة الحساب'},
+      'acc': {'tr': 'Hesap Yönetimi', 'en': 'Account Management', 'de': 'Kontoverwaltung', 'ru': 'Управление аккаунтом', 'es': 'Gestión de cuentas', 'ar': 'إدارة الحساب'},
       
-      // Profil
+      // Profil ve Temalar
       'cam': {'tr': 'Kameradan Çek', 'en': 'Take Photo', 'de': 'Foto machen', 'ru': 'Сделать фото', 'es': 'Tomar foto', 'ar': 'التقاط صورة'},
       'gal': {'tr': 'Galeriden Seç', 'en': 'Choose from Gallery', 'de': 'Aus Galerie wählen', 'ru': 'Выбрать из галереи', 'es': 'Elegir de la galería', 'ar': 'اختر من المعرض'},
       'del_pic': {'tr': 'Fotoğrafı Sil', 'en': 'Remove Photo', 'de': 'Foto löschen', 'ru': 'Удалить фото', 'es': 'Eliminar foto', 'ar': 'إزالة الصورة'},
-      'prof_col': {'tr': 'Profil Renginizi Seçin', 'en': 'Choose Profile Color', 'de': 'Profilfarbe wählen', 'ru': 'Выберите цвет профиля', 'es': 'Elige el color del perfil', 'ar': 'اختر لون الملف الشخصi'},
+      'prof_col': {'tr': 'Profil Renginizi Seçin', 'en': 'Choose Profile Color', 'de': 'Profilfarbe wählen', 'ru': 'Выберите цвет профиля', 'es': 'Elige el color del perfil', 'ar': 'اختر لون الملف الشخصي'},
+      'free_colors': {'tr': 'Ücretsiz Renkler', 'en': 'Free Colors', 'de': 'Kostenlose Farben', 'ru': 'Бесплатные цвета', 'es': 'Colores gratis', 'ar': 'ألوان مجانية'},
+      'plus_themes': {'tr': 'Orbit Plus Temaları', 'en': 'Orbit Plus Themes', 'de': 'Orbit Plus Themen', 'ru': 'Темы Orbit Plus', 'es': 'Temas Orbit Plus', 'ar': 'سمات Orbit Plus'},
       'name': {'tr': 'Görünen Ad', 'en': 'Display Name', 'de': 'Anzeigename', 'ru': 'Отображаемое имя', 'es': 'Nombre para mostrar', 'ar': 'الاسم المعروض'},
       'status': {'tr': 'Durum', 'en': 'Status', 'de': 'Status', 'ru': 'Статус', 'es': 'Estado', 'ar': 'الحالة'},
       'st_av': {'tr': 'Müsait', 'en': 'Available', 'de': 'Verfügbar', 'ru': 'В сети', 'es': 'Disponible', 'ar': 'متاح'},
       'st_bu': {'tr': 'Meşgul', 'en': 'Busy', 'de': 'Beschäftigt', 'ru': 'Занят', 'es': 'Ocupado', 'ar': 'مشغول'},
       'st_aw': {'tr': 'Uzakta', 'en': 'Away', 'de': 'Abwesend', 'ru': 'Нет на месте', 'es': 'Ausente', 'ar': 'بعيد'},
 
+      // 🟢 Yeni Eklenen Dialog Çevirileri
+      'theme_dialog_desc': {'tr': 'Bu premium tasarımı Orbit Plus ile sınırsız kullanabilir veya kısa bir reklam izleyerek 2 saat boyunca deneyimleyebilirsiniz.', 'en': 'You can use this premium design unlimitedly with Orbit Plus, or experience it for 2 hours by watching a short ad.', 'de': 'Sie können dieses Premium-Design mit Orbit Plus unbegrenzt nutzen oder 2 Stunden lang testen, indem Sie sich eine kurze Anzeige ansehen.', 'ru': 'Вы можете использовать этот премиум-дизайн неограниченно с Orbit Plus или испытать его в течение 2 часов, посмотрев короткую рекламу.', 'es': 'Puedes usar este diseño premium de forma ilimitada con Orbit Plus, o experimentarlo durante 2 horas viendo un breve anuncio.', 'ar': 'يمكنك استخدام هذا التصميم المتميز بلا حدود مع Orbit Plus ، أو تجربته لمدة ساعتين من خلال مشاهدة إعلان قصير.'},
+      'go_plus': {'tr': 'Plus\'a Geç', 'en': 'Upgrade to Plus', 'de': 'Zu Plus wechseln', 'ru': 'Перейти на Plus', 'es': 'Actualizar a Plus', 'ar': 'الترقية إلى Plus'},
+      'watch_ad': {'tr': 'Reklam İzle & Dene', 'en': 'Watch Ad & Try', 'de': 'Anzeige ansehen & testen', 'ru': 'Смотреть рекламу и попробовать', 'es': 'Ver anuncio y probar', 'ar': 'شاهد الإعلان وجرب'},
+      'theme_unlocked': {'tr': 'teması 2 saatliğine açıldı!', 'en': 'theme unlocked for 2 hours!', 'de': 'Thema für 2 Stunden freigeschaltet!', 'ru': 'тема разблокирована на 2 часа!', 'es': '¡tema desbloqueado por 2 horas!', 'ar': 'تم فتح السمة لمدة ساعتين!'},
+
       // Arayüz
       'lh_mode': {'tr': 'Sol El Modu', 'en': 'Left Hand Mode', 'de': 'Linkshänder-Modus', 'ru': 'Режим левой руки', 'es': 'Modo para zurdos', 'ar': 'وضع اليد اليسرى'},
       'lh_desc': {'tr': 'Arayüzü sol ele göre optimize eder', 'en': 'Optimizes UI for left-handed use', 'de': 'Optimiert die Benutzeroberfläche für Linkshänder', 'ru': 'Оптимизирует интерфейс для левшей', 'es': 'Optimiza la interfaz para uso con la mano izquierda', 'ar': 'يحسن واجهة المستخدم للاستخدام باليد اليسرى'},
       'circ_msg': {'tr': 'Dairesel Mesaj Balonları', 'en': 'Circular Message Bubbles', 'de': 'Runde Nachrichtenblasen', 'ru': 'Круглые облачки сообщений', 'es': 'Burbujas de mensajes circulares', 'ar': 'فقاعات رسائل دائرية'},
-      'circ_desc': {'tr': 'Klasik hap tasarımı yerine çembersel', 'en': 'Circular shapes instead of pill design', 'de': 'Runde Formen anstelle von Pillendesign', 'ru': 'Круглые формы вместо дизайна в виде таблеток', 'es': 'Formas circulares en lugar de diseño de píldora', 'ar': 'أشكال دائرية بدلاً من tasarım الكبسولة'},
+      'circ_desc': {'tr': 'Klasik hap tasarımı yerine çembersel', 'en': 'Circular shapes instead of pill design', 'de': 'Runde Formen anstelle von Pillendesign', 'ru': 'Круглые формы вместо дизайна в виде таблеток', 'es': 'Formas circulares en lugar de diseño de píldora', 'ar': 'أشكال دائرية بدلاً من تصميم الكبسولة'},
       'anim_live': {'tr': 'Yayın Animasyonu', 'en': 'Broadcast Animation', 'de': 'Broadcast-Animation', 'ru': 'Анимация трансляции', 'es': 'Animación de transmisión', 'ar': 'رسوم متحركة للبث'},
 
       // Ses & Donanım
@@ -202,20 +221,20 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
       'haptic': {'tr': 'Titreşim Geri Bildirim', 'en': 'Haptic Feedback', 'de': 'Haptisches Feedback', 'ru': 'Тактильная обратная связь', 'es': 'Retroalimentación háptica', 'ar': 'ردود الفعل اللمسية'},
       'haptic_desc': {'tr': 'Tuşlara basıldığında cihaz titrer', 'en': 'Vibrate on button press', 'de': 'Vibriert beim Tastendruck', 'ru': 'Вибрация при нажатии кнопок', 'es': 'Vibrar al pulsar el botón', 'ar': 'اهتزاز عند الضغط على الزر'},
       'ratchet': {'tr': 'Yörünge Çark Hissi (Çıkrık)', 'en': 'Orbit Ratchet Effect', 'de': 'Orbit Ratscheneffekt', 'ru': 'Эффект храповика', 'es': 'Efecto de trinquete de órbita', 'ar': 'تأثير السقاطة المدارية'},
-      'ratchet_desc': {'tr': 'Yörüngeyi çevirirken mekanik dişli titreşimi verir', 'en': 'Mechanical gear feedback when scrolling orbit', 'de': 'Mechanisches Zahnrad-Feedback beim Scrollen der Umlaufbahn', 'ru': 'Механическая обратная связь при прокрутке орбиты', 'es': 'Retroalimentación de engranaje mecánico al desplazar la órbita', 'ar': 'ردود فعل التروس الميكanيكية عند تمرير المدار'},
+      'ratchet_desc': {'tr': 'Yörüngeyi çevirirken mekanik dişli titreşimi verir', 'en': 'Mechanical gear feedback when scrolling orbit', 'de': 'Mechanisches Zahnrad-Feedback beim Scrollen der Umlaufbahn', 'ru': 'Механическая обратная связь при прокрутке орбиты', 'es': 'Retroalimentación de engranaje mecánico al desplazar la órbita', 'ar': 'ردود فعل التروس الميكانيكية عند تمرير المدار'},
 
       // Gizlilik
       'del_unsav': {'tr': 'Kaydedilmeyen Sesleri Sil', 'en': 'Delete Unsaved Audio', 'de': 'Nicht gespeichertes Audio löschen', 'ru': 'Удалить несохраненное аудио', 'es': 'Eliminar audio no guardado', 'ar': 'حذف الصوت غير المحفوظ'},
       'del_10s': {'tr': '10 Saniye Sonra', 'en': 'After 10 Seconds', 'de': 'Nach 10 Sekunden', 'ru': 'Через 10 секунд', 'es': 'Después de 10 segundos', 'ar': 'بعد 10 ثواني'},
       'del_30s': {'tr': '30 Saniye Sonra', 'en': 'After 30 Seconds', 'de': 'Nach 30 Sekunden', 'ru': 'Через 30 секунд', 'es': 'Después de 30 segundos', 'ar': 'بعد 30 ثانية'},
-      'del_60s': {'tr': '1 Dakika Sonra', 'en': 'After 1 Minute', 'de': 'Nach 1 Minute', 'ru': 'Через 1 минуту', 'es': 'Después de 1 minuto', 'ar': 'بعد دقيقة واحدة'},
+      'del_60s': {'tr': '1 Dakika Sonra', 'en': 'After 1 Minute', 'de': 'Nach 1 Minute', 'ru': 'Через 1 минуту', 'es': 'После 1 минуты', 'ar': 'بعد دقيقة واحدة'},
       'del_never': {'tr': 'Asla Silme', 'en': 'Never Delete', 'de': 'Nie löschen', 'ru': 'Никогда не удалять', 'es': 'Nunca eliminar', 'ar': 'عدم الحذف أبدًا'},
-      'who_conn': {'tr': 'Kimler Canlı Bağlanabilir?', 'en': 'Who can connect live?', 'de': 'Wer kann sich live verbinden?', 'ru': 'Кто может подключиться в прямом эфире?', 'es': '¿Кто puede conectarse en vivo?', 'ar': 'من يمكنه الاتصال المباشر؟'},
+      'who_conn': {'tr': 'Kimler Canlı Bağlanabilir?', 'en': 'Who can connect live?', 'de': 'Wer kann sich live verbinden?', 'ru': 'Кто может подключиться в прямом эфире?', 'es': '¿Quién puede conectarse en vivo?', 'ar': 'من يمكنه الاتصال المباشر؟'},
       'who_all': {'tr': 'Herkes', 'en': 'Everyone', 'de': 'Jeder', 'ru': 'Все', 'es': 'Todos', 'ar': 'الجميع'},
       'who_cont': {'tr': 'Sadece Kişilerim', 'en': 'My Contacts Only', 'de': 'Nur meine Kontakte', 'ru': 'Только мои контакты', 'es': 'Solo mis contactos', 'ar': 'جهات الاتصال الخاصة بي فقط'},
       'who_none': {'tr': 'Hiç Kimse (Kapalı)', 'en': 'Nobody (Closed)', 'de': 'Niemand (Geschlossen)', 'ru': 'Никто (Закрыто)', 'es': 'Nadie (Cerrado)', 'ar': 'لا أحد (مغلق)'},
 
-      // İzinler & Yasal (GÜNCELLENDİ)
+      // İzinler & Yasal
       'perm_warn': {'tr': 'Eğer kişileriniz Orbit\'te görünmüyorsa veya arama yapamıyorsanız, telefonunuzun kendi ayarlarından gerekli izinleri vermeniz gerekmektedir.', 'en': 'If your contacts are not visible or you cannot make calls, you need to grant permissions from your phone\'s settings.', 'de': 'Wenn Ihre Kontakte nicht sichtbar sind oder Sie keine Anrufe tätigen können, müssen Sie Berechtigungen in den Einstellungen Ihres Telefons erteilen.', 'ru': 'Если ваши контакты не видны или вы не можете совершать звонки, вам необходимо предоставить разрешения в настройках вашего телефона.', 'es': 'Si sus contactos no están visibles o no puede realizar llamadas, debe otorgar permisos en la configuración de su teléfono.', 'ar': 'إذا كانت جهات الاتصال الخاصة بك غير مرئية أو لا يمكنك إجراء مكالمات ، فأنت بحاجة إلى منح أذونات من إعدادات هاتفك.'},
       'btn_perm': {'tr': 'Sistem İzin Ayarları', 'en': 'System Permission Settings', 'de': 'Systemberechtigungseinstellungen', 'ru': 'Системные настройки разрешений', 'es': 'Configuración de permisos del sistema', 'ar': 'إعدادات إذن النظام'},
       'legal_docs': {'tr': 'Yasal Dokümanlar', 'en': 'Legal Documents', 'de': 'Rechtliche Dokumente', 'ru': 'Юридические документы', 'es': 'Documentos legales', 'ar': 'الوثائق القانونية'},
@@ -234,7 +253,7 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
       'ringtone': {'tr': 'Canlı Arama Zil Sesi', 'en': 'Live Call Ringtone', 'de': 'Live-Anruf-Klingelton', 'ru': 'Мелодия прямого звонка', 'es': 'Tono de llamada en vivo', 'ar': 'نغمة رنين المكالمات المباشرة'},
       'ring_sys': {'tr': 'Standart (Telefonun Sesi)', 'en': 'Standard (System Default)', 'de': 'Standard (Systemvorgabe)', 'ru': 'Стандартный (системный)', 'es': 'Estándar (predeterminado del sistema)', 'ar': 'قياسي (افتراضي للنظام)'},
       'ring_r1': {'tr': 'Telsiz Sesi 1', 'en': 'Radio Sound 1', 'de': 'Funkgeräusch 1', 'ru': 'Звук радио 1', 'es': 'Sonido de radio 1', 'ar': 'صوت راديو 1'},
-      'ring_r2': {'tr': 'Telsiz Sesi 2', 'en': 'Radio Sound 2', 'de': 'Funkgeräusch 2', 'ru': 'Звук радио 2', 'es': 'Sonido de radio 2', 'ar': 'صوت رادyo 2'},
+      'ring_r2': {'tr': 'Telsiz Sesi 2', 'en': 'Radio Sound 2', 'de': 'Funkgeräusch 2', 'ru': 'Звук радио 2', 'es': 'Sonido de radio 2', 'ar': 'صوت راديو 2'},
       'ring_r3': {'tr': 'Telsiz Sesi 3', 'en': 'Radio Sound 3', 'de': 'Funkgeräusch 3', 'ru': 'Звук радио 3', 'es': 'Sonido de radio 3', 'ar': 'صوت راديو 3'},
       'ring_e1': {'tr': 'Acil Durum 1', 'en': 'Emergency 1', 'de': 'Notfall 1', 'ru': 'Экстренная ситуация 1', 'es': 'Emergencia 1', 'ar': 'طوارئ 1'},
       'ring_e2': {'tr': 'Acil Durum 2', 'en': 'Emergency 2', 'de': 'Notfall 2', 'ru': 'Экстренная ситуация 2', 'es': 'Emergencia 2', 'ar': 'طوارئ 2'},
@@ -248,13 +267,13 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
       'btn_clear': {'tr': 'Temizle', 'en': 'Clear', 'de': 'Klar', 'ru': 'Очистить', 'es': 'Limpiar', 'ar': 'مسح'},
       'stor_desc': {'tr': 'Cihazda tutulan kayıtlı ses dosyalarının boyutunu azaltmak için seçtiğiniz günden daha eski dosyaları topluca silebilirsiniz.', 'en': 'You can mass delete files older than the selected days to reduce the storage size of saved audio files on the device.', 'de': 'Sie können massenhaft löschen Dateien, die älter sind als die ausgewählten Tage, um die Speichergröße der gespeicherten Audiodateien auf dem Gerät zu reduzieren.', 'ru': 'Вы можете массово удалить файлы старше выбранных дней, чтобы уменьшить размер хранилища сохраненных аудиофайлов на устройстве.', 'es': 'Puede eliminar en masa los archivos más antiguos que los días seleccionados para reducir el tamaño de almacenamiento de los archivos de audio guardados en el dispositivo.', 'ar': 'يمكنك حذف الملفات الأقدم من الأيام المحددة بشكل جماعي لتقليل حجم تخزين الملفات الصوتية المحفوظة على الجهاز.'},
 
-      // Hesap Yönetimi (DÜZELTİLDİ)
+      // Hesap Yönetimi
       'logout': {'tr': 'Çıkış Yap', 'en': 'Log Out', 'de': 'Abmelden', 'ru': 'Выйти', 'es': 'Cerrar sesión', 'ar': 'تسجيل الخروج'},
       'logout_q': {'tr': 'Hesabınızdan çıkış yapmak istediğinize emin misiniz?', 'en': 'Are you sure you want to log out of your account?', 'de': 'Sind Sie sicher, dass Sie sich von Ihrem Konto abmelden möchten?', 'ru': 'Вы уверены, что хотите выйти из своей учетной записи?', 'es': '¿Estás seguro de que quieres cerrar sesión en tu cuenta?', 'ar': 'هل أنت متأكد أنك تريد تسجيل الخروج من حسابك؟'},
       'cancel': {'tr': 'İptal', 'en': 'Cancel', 'de': 'Abbrechen', 'ru': 'Отмена', 'es': 'Cancelar', 'ar': 'إلغاء'},
       'del_acc': {'tr': 'Hesabımı Sil', 'en': 'Delete My Account', 'de': 'Mein Konto löschen', 'ru': 'Удалить мой аккаунт', 'es': 'Eliminar mi cuenta', 'ar': 'حذف حسابي'},
-      'del_warn': {'tr': 'Hesabınızı sildiğinizde, veritabanındaki tüm profiliniz kalıcı olarak silinir ve bu işlem geri alınamaz.', 'en': 'When you delete your account, your entire profile in the database will be permanently deleted and this cannot be undone.', 'de': 'Wenn Sie Ihr Konto löschen, wird Ihr gesamtes Profil in der Datenbank dauerhaft gelöscht und kann nicht rückgängig gemacht werden.', 'ru': 'При удалении аккаунта весь ваш профиль в базе данных будет навсегда удален, ve это действие нельзя отменить.', 'es': 'Cuando eliminas tu cuenta, todo tu perfil en la base de datos se eliminará permanentemente ve bu işlem geri alınamaz.', 'ar': 'عند حذف حسابك ، سيتم حذف ملفك الشخصi بالكامل في قاعدة البيانات نهائيًا ولا يمكن التراجع عن هذا الإجراء.'},
-      'del_acc_q': {'tr': 'Bu işlem GERİ ALINAMAZ. Profiliniz ve veritabanındaki tüm kayıtlarınız kalıcı olarak silinecek. Emin misiniz?', 'en': 'This action CANNOT BE UNDONE. Your profile and all records in the database will be permanently deleted. Are you sure?', 'de': 'Diese Aktion kann NICHT rückgängig gemacht werden. Ihr Profil und alle Datensätze in der Datenbank werden dauerhaft gelöscht. Sind Sie sicher?', 'ru': 'Это действие НЕВОЗМОЖНО ОТМЕНИТЬ. Ваш профиль ve все записи в базе данных будут навсегда удалены. Вы уверены?', 'es': 'Esta acción NO SE PUEDE DESHACER. Su perfil ve todos los registros en la base de datos se eliminarán de forma permanente. ¿Estás seguro?', 'ar': 'لا يمكن التراجع عن هذا الإجراء. سيتم حذف ملفك الشخصi وجميع السجلات في قاعدة البيانات بشكل دائم. هل أنت متأكد؟'},
+      'del_warn': {'tr': 'Hesabınızı sildiğinizde, veritabanındaki tüm profiliniz kalıcı olarak silinir ve bu işlem geri alınamaz.', 'en': 'When you delete your account, your entire profile in the database will be permanently deleted and this cannot be undone.', 'de': 'Wenn Sie Ihr Konto löschen, wird Ihr gesamtes Profil in der Datenbank dauerhaft gelöscht und kann nicht rückgängig gemacht werden.', 'ru': 'При удалении аккаунта весь ваш профиль в базе данных будет навсегда удален, и это действие нельзя отменить.', 'es': 'Cuando eliminas tu cuenta, todo tu perfil en la base de datos se eliminará permanentemente y esta acción no se puede deshacer.', 'ar': 'عند حذف حسابك ، سيتم حذف ملفك الشخصي بالكامل في قاعدة البيانات نهائيًا ولا يمكن التراجع عن هذا الإجراء.'},
+      'del_acc_q': {'tr': 'Bu işlem GERİ ALINAMAZ. Profiliniz ve veritabanındaki tüm kayıtlarınız kalıcı olarak silinecek. Emin misiniz?', 'en': 'This action CANNOT BE UNDONE. Your profile and all records in the database will be permanently deleted. Are you sure?', 'de': 'Diese Aktion kann NICHT rückgängig gemacht werden. Ihr Profil und alle Datensätze in der Datenbank werden dauerhaft gelöscht. Sind Sie sicher?', 'ru': 'Это действие НЕВОЗМОЖНО ОТМЕНИТЬ. Ваш профиль и все записи в базе данных будут навсегда удалены. Вы уверены?', 'es': 'Esta acción NO SE PUEDE DESHACER. Su perfil y todos los registros en la base de datos se eliminarán de forma permanente. ¿Estás seguro?', 'ar': 'لا يمكن التراجع عن هذا الإجراء. سيتم حذف ملفك الشخصي وجميع السجلات في قاعدة البيانات بشكل دائم. هل أنت متأكد؟'},
       'give_up': {'tr': 'Vazgeç', 'en': 'Give Up', 'de': 'Aufgeben', 'ru': 'Сдаваться', 'es': 'Renunciar', 'ar': 'تخلى'},
       'yes_del': {'tr': 'Evet, Kalıcı Olarak Sil', 'en': 'Yes, Delete Permanently', 'de': 'Ja, dauerhaft löschen', 'ru': 'Да, удалить навсегда', 'es': 'Sí, eliminar permanentemente', 'ar': 'نعم ، احذف نهائيًا'},
     };
@@ -283,6 +302,63 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
     setState(() {
       _expandedSection = _expandedSection == sectionName ? null : sectionName;
     });
+  }
+
+  // 🟢 YENİ EKLENEN: Temayı açma dialogu
+  void _showThemeUnlockDialog(Map<String, dynamic> theme) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: _lang == 'ar' ? TextDirection.rtl : TextDirection.ltr,
+        child: AlertDialog(
+          backgroundColor: Colors.grey.shade900,
+          title: Text(theme['name'], style: const TextStyle(color: Colors.white)),
+          content: Text(
+            _t('theme_dialog_desc'),
+            style: const TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.pop(context); // Ayarlar menüsünü de kapat
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const OrbitPlusScreen()));
+              },
+              child: Text(_t('go_plus'), style: const TextStyle(color: Colors.amber)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _handleRewardForTheme(theme['name']); 
+              },
+              child: Text(_t('watch_ad'), style: const TextStyle(color: Colors.black)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 🟢 YENİ EKLENEN: Reklam başarıyla izlendikten sonra çalışan fonksiyon
+  void _handleRewardForTheme(String themeName) async {
+    // TODO: Gerçek AdMob showRewardedAd buraya eklenecek
+    // Şimdilik başarılı varsayıp SharedPreferences'a kaydediyoruz:
+    final prefs = await SharedPreferences.getInstance();
+    final expiry = DateTime.now().add(const Duration(hours: 2)).toIso8601String();
+    await prefs.setString('unlocked_theme', themeName);
+    await prefs.setString('unlocked_theme_expiry', expiry);
+    
+    if (mounted) {
+      Navigator.pop(context); // Ayarları kapat
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("$themeName ${_t('theme_unlocked')}"), backgroundColor: Colors.green)
+      );
+      
+      // Hemen değişimi yansıtmak için temanın ilk rengini avatar rengi gibi set edelim
+      final theme = _plusThemes.firstWhere((t) => t['name'] == themeName);
+      widget.onCustomAvatarColorChanged(theme['colors'][0]);
+    }
   }
 
   Widget _buildGlassmorphismContainer({required Widget child}) {
@@ -372,7 +448,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
-              // 🟢 Menü adları ve bayrakları her dilde aynı yönde (LTR) kalsın
               textDirection: TextDirection.ltr, 
               children: [
                 Text(langMap['flag']!, style: const TextStyle(fontSize: 16)),
@@ -478,9 +553,14 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
         ),
         
         if (_currentAvatarPath == null) ...[
-          const SizedBox(height: 15),
-          Text(_t('prof_col'), style: const TextStyle(color: Colors.white54, fontSize: 11)),
-          const SizedBox(height: 8),
+          const SizedBox(height: 25),
+          
+          // --- ÜCRETSİZ RENKLER ---
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(_t('free_colors'), style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          ),
+          const SizedBox(height: 10),
           SizedBox(
             height: 35,
             child: ListView.builder(
@@ -509,9 +589,54 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
               },
             ),
           ),
+
+          const SizedBox(height: 25),
+
+          // --- 🟢 PREMIUM (PLUS) TEMALAR KISMI ---
+          Row(
+            children: [
+              const Icon(Icons.stars, color: Colors.amber, size: 16),
+              const SizedBox(width: 6),
+              Text(_t('plus_themes'), style: const TextStyle(color: Colors.amber, fontSize: 13, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 45,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: _plusThemes.length,
+              itemBuilder: (context, index) {
+                final theme = _plusThemes[index];
+                return GestureDetector(
+                  onTap: () {
+                    // 🟢 Reklamlı / Satın almalı diyalog tetikleniyor
+                    _showThemeUnlockDialog(theme);
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 12),
+                    width: 45,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        colors: theme['colors'],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      border: Border.all(color: Colors.amber.withValues(alpha: 0.6), width: 2),
+                      boxShadow: [BoxShadow(color: theme['colors'][0].withValues(alpha: 0.5), blurRadius: 8)],
+                    ),
+                    child: const Center(
+                      child: Icon(Icons.lock_outline, size: 16, color: Colors.white70), // Kilit İkonu
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
         ],
 
-        const SizedBox(height: 20),
+        const SizedBox(height: 30),
         TextField(
           controller: _nameController,
           style: const TextStyle(color: Colors.white),
@@ -674,7 +799,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
     );
   }
 
-  // 🟢 YENİLENEN: İZİNLER VE YASAL BÖLÜMÜ
   void _showAyarlarLegalDialog(String type) {
     showDialog(
       context: context,

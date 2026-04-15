@@ -52,13 +52,15 @@ dependencies:
   flutter_contacts: ^2.0.0
   http: ^1.6.0
   shared_preferences: ^2.5.4
-  
-  # 🟢 EKLENDİ: Yasal Onay ekranındaki metinleri şık HTML formatında göstermek için
   flutter_html: ^3.0.0-beta.2
   
-  # 🟢 EKLENDİ: Dil çeviri motoru ve Arapça (Sağdan Sola - RTL) desteği için
+  # 🟢 Dil çeviri motoru ve Arapça (Sağdan Sola - RTL) desteği için
   flutter_localizations:
     sdk: flutter
+
+  # 🟢 Google AdMob (Ödüllü Reklam Motoru)
+  google_mobile_ads: ^5.1.0
+  purchases_flutter: ^10.0.0
 
 dev_dependencies:
   flutter_test:

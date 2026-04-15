@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_localizations/flutter_localizations.dart'; // 🟢 EKLENDİ: Çoklu dil desteği
+import 'package:purchases_flutter/purchases_flutter.dart';
+import 'dart:io' show Platform;
 
 import 'firebase_options.dart'; // 🟢 EKLENDİ: Firebase konfigürasyon dosyası
 import 'screens/login_screen.dart';
@@ -63,7 +65,37 @@ void main() async {
     // 🛑 EĞER BİR ŞEY ÇÖKERSE BEYAZ EKRANDA KALMAMASI İÇİN BURAYA DÜŞECEK
     debugPrint("❌ KRİTİK BAŞLATMA HATASI: $e");
   }
-  
+  // 🟢 REVENUECAT (ÖDEME ALTYAPISI) BAŞLATMA
+  try {
+    if (Platform.isIOS || Platform.isAndroid) {
+      await Purchases.setLogLevel(LogLevel.error); // Test aşamasında debug yapılabilir
+      
+      late PurchasesConfiguration configuration;
+      if (Platform.isAndroid) {
+        // TODO: RevenueCat panelinden alınacak Google Play Public API Key buraya yazılacak
+        configuration = PurchasesConfiguration("goog_BURAYA_PLAY_STORE_KEY_GELECEK");
+      } else {
+        // TODO: RevenueCat panelinden alınacak App Store Public API Key buraya yazılacak
+        configuration = PurchasesConfiguration("appl_BURAYA_APP_STORE_KEY_GELECEK");
+      }
+      await Purchases.configure(configuration);
+      // 🛡️ GÜVENLİK ZIRHI: Açılışta abonelik durumunu sunucudan teyit et
+    CustomerInfo customerInfo = await Purchases.getCustomerInfo();
+    final prefs = await SharedPreferences.getInstance();
+    
+    if (customerInfo.entitlements.all["orbit_plus"]?.isActive == true) {
+      debugPrint("✅ Doğrulandı: Kullanıcı gerçekten Plus üyesi.");
+      await prefs.setBool('is_orbit_plus', true);
+    } else {
+      debugPrint("⚠️ Uyarı: Abonelik bulunamadı veya süresi dolmuş. Yetkiler alınıyor.");
+      await prefs.setBool('is_orbit_plus', false);
+    }
+
+
+    }
+  } catch (e) {
+    debugPrint("RevenueCat Başlatma Hatası: $e");
+  }
   // Hata olsa bile uygulamayı ZORLA başlat (Beyaz ekranı kır!)
   runApp(const OrbitApp());
 }
