@@ -246,7 +246,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     }
   }
 
-  // 🚀 RADAR VE FİLTRE EKLENMİŞ SMS İSTEK FONKSİYONU
   Future<void> _requestOtp() async {
    debugPrint ("🚀 DİKKAT: 'Kod Gönder' butonuna basıldı!");
 
@@ -255,11 +254,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       return;
     }
     
-    // 1. Boşlukları temizle
     String rawPhone = _phoneController.text.trim().replaceAll(' ', '');
     debugPrint("📱 Kullanıcının girdiği ham numara: $rawPhone");
 
-    // 2. Eğer başta '0' varsa kes at (Sessiz hatayı önler)
     if (rawPhone.startsWith('0')) {
       rawPhone = rawPhone.substring(1);
       debugPrint("✂️ Baştaki sıfır temizlendi. Yeni numara: $rawPhone");
@@ -273,7 +270,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     
     setState(() { _isLoading = true; _errorMessage = ""; });
     
-    // 3. Ülke koduyla birleştir
     final fullPhone = "$_selectedCountryCode$rawPhone";
     debugPrint("🔥 Firebase'e Gönderilen Tam Numara: $fullPhone");
 
@@ -356,6 +352,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     }
   }
 
+  // 🛡️ [GÜMRÜK KÖPRÜSÜ]: Firebase onayından sonra DigitalOcean'dan Giriş Kartı (JWT) Alma
   Future<void> _signInWithFirebase(PhoneAuthCredential credential) async {
     try {
       UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
@@ -370,7 +367,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
         if (idToken != null) {
           final response = await http.post(
-            Uri.parse('http://192.168.1.7:3000/api/auth/verify-otp'),
+            Uri.parse('http://188.166.101.147:3005/api/auth/verify-otp'),
             headers: {'Content-Type': 'application/json'},
             body: json.encode({'idToken': idToken}),
           );
@@ -380,6 +377,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
             final data = json.decode(response.body);
             final String jwtToken = data['token']; 
             
+            // 💾 DİKKAT: Ana ekranın (orbit_main_screen) aradığı bilet hafızaya kaydediliyor
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString('user_phone', phoneNumber);
             await prefs.setString('auth_token', jwtToken); 

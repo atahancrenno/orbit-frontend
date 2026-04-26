@@ -9,6 +9,7 @@ class OrbitContactAvatar extends StatelessWidget {
   final int unreadCount;
   final String userName;
   final Color myCustomColor;
+  final Color? statusColor; // 🟢 YENİ: Durum rengini buraya aldık!
 
   const OrbitContactAvatar({
     super.key,
@@ -20,6 +21,7 @@ class OrbitContactAvatar extends StatelessWidget {
     required this.unreadCount,
     required this.userName,
     required this.myCustomColor,
+    this.statusColor, // 🟢 YENİ
   });
 
   String _getInitials(String name) {
@@ -50,19 +52,19 @@ class OrbitContactAvatar extends StatelessWidget {
       ringColor = Colors.greenAccent;
       innerColor = Colors.black.withValues(alpha: 0.9);
     } else if (isActive) {
-      ringColor = Colors.cyanAccent;
+      ringColor = statusColor ?? Colors.cyanAccent; // 🟢 Seçiliyken durum renginde parlasın
       innerColor = Colors.black.withValues(alpha: 0.9);
     } else if (showSearchField && isMatch) {
       ringColor = Colors.orangeAccent;
       innerColor = Colors.black.withValues(alpha: 0.9);
     } else {
-      ringColor = Colors.white30;
+      ringColor = statusColor ?? Colors.white30; // 🟢 İnce Çerçeve Rengi (Duruma göre değişir)
       if (isGroup) {
         innerColor = Colors.deepPurpleAccent.withValues(alpha: 0.8);
       } else if (contact['name'] == userName) {
         innerColor = myCustomColor;
       } else {
-        innerColor = _getAutoAvatarColor(contact['name']);
+        innerColor = _getAutoAvatarColor(contact['name']); // İç rengi koruduk ki yazılar okunsun
       }
     }
 
@@ -73,9 +75,15 @@ class OrbitContactAvatar extends StatelessWidget {
           width: 60, height: 60,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            border: Border.all(color: ringColor, width: (isActive || isLive) ? 5.0 : 4.0),
+            border: Border.all(color: ringColor, width: (isActive || isLive) ? 5.0 : 3.0),
             color: Colors.transparent,
-            boxShadow: [ if (isActive || isLive) BoxShadow(color: ringColor.withValues(alpha: 0.5), blurRadius: 10) ],
+            // 🟢 SİHİRLİ NEON HALKA: Durum rengine göre dışarıya doğru neon ışık saçar
+            boxShadow: [ 
+              if (isActive || isLive) 
+                BoxShadow(color: ringColor.withValues(alpha: 0.6), blurRadius: 12, spreadRadius: 2)
+              else if (statusColor != null)
+                BoxShadow(color: ringColor.withValues(alpha: 0.4), blurRadius: 8, spreadRadius: 1)
+            ],
           ),
           padding: const EdgeInsets.all(7.0),
           child: Container(

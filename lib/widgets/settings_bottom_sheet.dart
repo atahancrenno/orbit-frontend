@@ -9,8 +9,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_html/flutter_html.dart'; 
 import '../constants/legal_texts.dart'; 
 
-// 🟢 DOSYA YOLU DÜZELTİLDİ (screens klasörünün içinde aranacak)
 import '../screens/orbit_plus_screen.dart'; 
+// 🛡️ ADAPTY MERKEZİ KONTROL KULESİ EKLENDİ
+import '../services/subscription_service.dart';
 
 class SettingsBottomSheet extends StatefulWidget {
   final String userName;
@@ -202,7 +203,7 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
       'st_bu': {'tr': 'Meşgul', 'en': 'Busy', 'de': 'Beschäftigt', 'ru': 'Занят', 'es': 'Ocupado', 'ar': 'مشغول'},
       'st_aw': {'tr': 'Uzakta', 'en': 'Away', 'de': 'Abwesend', 'ru': 'Нет на месте', 'es': 'Ausente', 'ar': 'بعيد'},
 
-      // 🟢 Yeni Eklenen Dialog Çevirileri
+      // Yeni Eklenen Dialog Çevirileri
       'theme_dialog_desc': {'tr': 'Bu premium tasarımı Orbit Plus ile sınırsız kullanabilir veya kısa bir reklam izleyerek 2 saat boyunca deneyimleyebilirsiniz.', 'en': 'You can use this premium design unlimitedly with Orbit Plus, or experience it for 2 hours by watching a short ad.', 'de': 'Sie können dieses Premium-Design mit Orbit Plus unbegrenzt nutzen oder 2 Stunden lang testen, indem Sie sich eine kurze Anzeige ansehen.', 'ru': 'Вы можете использовать этот премиум-дизайн неограниченно с Orbit Plus или испытать его в течение 2 часов, посмотрев короткую рекламу.', 'es': 'Puedes usar este diseño premium de forma ilimitada con Orbit Plus, o experimentarlo durante 2 horas viendo un breve anuncio.', 'ar': 'يمكنك استخدام هذا التصميم المتميز بلا حدود مع Orbit Plus ، أو تجربته لمدة ساعتين من خلال مشاهدة إعلان قصير.'},
       'go_plus': {'tr': 'Plus\'a Geç', 'en': 'Upgrade to Plus', 'de': 'Zu Plus wechseln', 'ru': 'Перейти на Plus', 'es': 'Actualizar a Plus', 'ar': 'الترقية إلى Plus'},
       'watch_ad': {'tr': 'Reklam İzle & Dene', 'en': 'Watch Ad & Try', 'de': 'Anzeige ansehen & testen', 'ru': 'Смотреть рекламу и попробовать', 'es': 'Ver anuncio y probar', 'ar': 'شاهد الإعلان وجرب'},
@@ -305,7 +306,19 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
   }
 
   // 🟢 YENİ EKLENEN: Temayı açma dialogu
-  void _showThemeUnlockDialog(Map<String, dynamic> theme) {
+  void _showThemeUnlockDialog(Map<String, dynamic> theme) async {
+    bool isPremium = await SubscriptionService.isPremium();
+    
+    if (isPremium) {
+      // Premium ise doğrudan temayı uygula
+      widget.onCustomAvatarColorChanged(theme['colors'][0]);
+      if(mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${theme['name']} teması uygulandı!"), backgroundColor: Colors.green));
+      }
+      return;
+    }
+
+    if(!mounted) return;
     showDialog(
       context: context,
       builder: (ctx) => Directionality(
@@ -322,7 +335,7 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
               onPressed: () {
                 Navigator.pop(ctx);
                 Navigator.pop(context); // Ayarlar menüsünü de kapat
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const OrbitPlusScreen()));
+                SubscriptionService.showPaywall(context); // 🛡️ PAYWALL AÇILIR
               },
               child: Text(_t('go_plus'), style: const TextStyle(color: Colors.amber)),
             ),
@@ -427,6 +440,60 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
       crossFadeState: isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
       duration: const Duration(milliseconds: 300),
       sizeCurve: Curves.easeInOut,
+    );
+  }
+
+  // 🛡️ YENİ EKLENEN: ADAPTY PREMIUM BANNER
+  Widget _buildPremiumBanner() {
+    return FutureBuilder<bool>(
+      future: SubscriptionService.isPremium(),
+      builder: (context, snapshot) {
+        bool isPlus = snapshot.data ?? false;
+        
+        return GestureDetector(
+          onTap: () {
+            if (!isPlus) {
+              Navigator.pop(context); // Ayarları kapat
+              SubscriptionService.showPaywall(context); // Vitrini aç
+            }
+          },
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(
+              gradient: isPlus 
+                ? LinearGradient(colors: [Colors.grey.shade800, Colors.grey.shade900])
+                : const LinearGradient(colors: [Colors.amber, Colors.orangeAccent]),
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: isPlus ? Colors.amber : Colors.white54, width: 1),
+              boxShadow: isPlus ? [] : [BoxShadow(color: Colors.amber.withValues(alpha: 0.3), blurRadius: 10, spreadRadius: 1)],
+            ),
+            child: Row(
+              children: [
+                Icon(isPlus ? Icons.verified : Icons.stars, color: isPlus ? Colors.amber : Colors.white, size: 30),
+                const SizedBox(width: 15),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isPlus ? "Orbit Plus Üyesisiniz" : "Orbit Plus'a Yükselt",
+                        style: TextStyle(color: isPlus ? Colors.amber : Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        isPlus ? "Tüm premium özellikler aktif." : "Sınırları kaldırın, premium temaları açın.",
+                        style: TextStyle(color: isPlus ? Colors.white70 : Colors.white.withValues(alpha: 0.9), fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                if (!isPlus) const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 16),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1148,13 +1215,16 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
             return Column(
               children: [
                 Container(
-                  margin: const EdgeInsets.only(top: 10, bottom: 20),
+                  margin: const EdgeInsets.only(top: 10, bottom: 10),
                   width: 40, height: 5,
                   decoration: BoxDecoration(color: Colors.white30, borderRadius: BorderRadius.circular(10)),
                 ),
                 
                 Text(_t('title'), style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w300, letterSpacing: 1.2)),
-                const SizedBox(height: 20),
+                const SizedBox(height: 10),
+                
+                // 🛡️ ADAPTY BANNER BURAYA EKLENDİ
+                _buildPremiumBanner(),
 
                 Expanded(
                   child: ListView(

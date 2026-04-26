@@ -27,7 +27,6 @@ class OrbitContactNode extends StatefulWidget {
   final Color myCustomColor;
   final Color? statusColor;
   
-  // 🟢 YENİ: Menüler açıldığında yörüngeyi karanlığa gömen tetikleyici
   final bool isMenuExpanded; 
 
   final VoidCallback onOpenContacts;
@@ -140,7 +139,6 @@ class _OrbitContactNodeState extends State<OrbitContactNode> with SingleTickerPr
 
     double baseOpacity = 1.0;
     
-    // 🟢 FOCUS MODU: Eğer menüler açıksa yörüngeyi tamamen silikleştir!
     if (widget.isMenuExpanded) {
       baseOpacity = 0.1;
     } else {
@@ -182,7 +180,6 @@ class _OrbitContactNodeState extends State<OrbitContactNode> with SingleTickerPr
     }
 
     double finalOpacity = (baseOpacity * fadeOpacity).clamp(0.0, 1.0);
-    // 🟢 Menü açıkken arka plana dokunulamaz
     bool isInteractable = finalOpacity > 0.2 && !widget.isMenuExpanded;
 
     bool showLaser = false;
@@ -219,11 +216,12 @@ class _OrbitContactNodeState extends State<OrbitContactNode> with SingleTickerPr
         alignment: Alignment.center,
         children: [
           CustomPaint(
+            // Noktayı çizecek olan motor burası! 
             painter: CurvedTextPainter(
               text: _formatName(widget.contact['name']).toUpperCase(),
               radius: 46,
               color: isEmptySlot ? Colors.white30 : ((widget.showSearchField && isMatch && widget.searchQuery.isNotEmpty) ? Colors.orangeAccent : (widget.isLive ? Colors.greenAccent : (isActive ? Colors.cyanAccent : Colors.white70))),
-              statusColor: widget.statusColor,
+              statusColor: widget.statusColor, // Rengi buraya gönderiyoruz
               baseAngle: animGlobalAngle,
             ),
           ),
@@ -238,7 +236,7 @@ class _OrbitContactNodeState extends State<OrbitContactNode> with SingleTickerPr
                   ...List.generate(3, (i) => widget.incomingWaveBuilder(i)),
                   
                 OrbitContactAvatar(
-                  contact: widget.contact, isActive: isActive, isMatch: isMatch, isLive: widget.isLive, showSearchField: widget.showSearchField, unreadCount: widget.unreadCount, userName: widget.userName, myCustomColor: widget.myCustomColor,
+                  contact: widget.contact, isActive: isActive, isMatch: isMatch, isLive: widget.isLive, showSearchField: widget.showSearchField, unreadCount: widget.unreadCount, userName: widget.userName, myCustomColor: widget.myCustomColor,statusColor: widget.statusColor,
                 ),
                 
                 if (isBeingPulled)
@@ -251,12 +249,6 @@ class _OrbitContactNodeState extends State<OrbitContactNode> with SingleTickerPr
                     ),
                     child: const Icon(Icons.wifi_tethering, color: Colors.greenAccent, size: 28),
                   ),
-                
-                if (widget.statusColor != null && !isBeingPulled)
-                   Positioned(
-                     bottom: 18, right: 18,
-                     child: Container(width: 12, height: 12, decoration: BoxDecoration(color: widget.statusColor, shape: BoxShape.circle, border: Border.all(color: Colors.black, width: 2))),
-                   )
               ],
             ),
             

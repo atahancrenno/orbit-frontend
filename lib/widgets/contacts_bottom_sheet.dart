@@ -149,7 +149,16 @@ class _ContactsBottomSheetState extends State<ContactsBottomSheet> with SingleTi
       
       Set<String> registeredPhonesSet = {};
       try {
-        final response = await http.get(Uri.parse('http://192.168.1.7:3000/api/users'));
+        final prefs = await SharedPreferences.getInstance();
+        final token = prefs.getString('auth_token') ?? '';
+
+        final response = await http.get(
+          Uri.parse('http://188.166.101.147:3005/api/users'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        );
         
         if (response.statusCode == 200) {
           List<dynamic> users = jsonDecode(response.body);
@@ -236,7 +245,8 @@ class _ContactsBottomSheetState extends State<ContactsBottomSheet> with SingleTi
     }
   }
 
-  void _createAndReturnGroup() {
+  // 🚀 GÜNCELLENEN FONKSİYON: Artık grubu direkt sunucuda oluşturuyor!
+  Future<void> _createAndReturnGroup() async {
     if (_groupNameController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('group_name_empty')), backgroundColor: Colors.orange));
       return;
@@ -246,23 +256,55 @@ class _ContactsBottomSheetState extends State<ContactsBottomSheet> with SingleTi
       return;
     }
 
-    String groupId = "group_${DateTime.now().millisecondsSinceEpoch}";
+    setState(() { _isLoading = true; }); // UI Yükleniyor durumuna geçer
+
     List<String> allMembers = _selectedPhonesForGroup.toList();
     if (_currentUserPhone != null && !allMembers.contains(_currentUserPhone)) {
       allMembers.add(_currentUserPhone!); 
     }
 
-    Map<String, dynamic> newGroup = {
-      "id": groupId,
-      "name": _groupNameController.text.trim(),
-      "isGroup": true,
-      "members": allMembers,
-      "admins": _currentUserPhone != null ? [_currentUserPhone] : [], 
-      "createdBy": _currentUserPhone ?? "unknown",
-      "createdAt": DateTime.now().toIso8601String(),
-    };
+    try {
+      // 🛂 ZIRHLI BİLETİ ALIYORUZ
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token') ?? '';
 
-    Navigator.pop(context, newGroup);
+      // 🚀 BACKEND'E İSTEK ATIYORUZ
+      final response = await http.post(
+        Uri.parse('http://188.166.101.147:3005/api/groups'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: json.encode({
+          'name': _groupNameController.text.trim(),
+          'members': allMembers,
+        }),
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = json.decode(response.body);
+        
+        // Gelen resmi grup id'si ile ana ekrana dönecek obje
+        Map<String, dynamic> newGroup = {
+          "id": data['_id'] ?? "group_${DateTime.now().millisecondsSinceEpoch}",
+          "uid": data['_id'] ?? "group_${DateTime.now().millisecondsSinceEpoch}",
+          "name": data['name'] ?? _groupNameController.text.trim(),
+          "isGroup": true,
+          "members": allMembers,
+        };
+
+        if (!mounted) return;
+        Navigator.pop(context, newGroup);
+      } else {
+        if (!mounted) return;
+        setState(() { _isLoading = false; });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Sunucu Hatası: ${response.statusCode}"), backgroundColor: Colors.redAccent));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _isLoading = false; });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Bağlantı Hatası: $e"), backgroundColor: Colors.redAccent));
+    }
   }
 
   void _handleGroupSelection(String phone, bool isSelected) {
@@ -542,7 +584,7 @@ class _ContactsBottomSheetState extends State<ContactsBottomSheet> with SingleTi
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent.withValues(alpha: 0.2), foregroundColor: Colors.cyanAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                   icon: const Icon(Icons.group_add, size: 18),
                   label: Text(_t('create_group_btn'), style: const TextStyle(fontWeight: FontWeight.bold)),
-                  onPressed: _createAndReturnGroup,
+                  onPressed: _isLoading ? null : _createAndReturnGroup,
                 ),
               )
             ],

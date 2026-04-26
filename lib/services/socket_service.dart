@@ -6,10 +6,11 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:http/http.dart' as http; 
 
-
 class SocketService {
   static final SocketService _instance = SocketService._internal();
   factory SocketService() => _instance;
+
+  
   
   SocketService._internal(); 
 
@@ -19,6 +20,7 @@ class SocketService {
   String myUserId = ""; 
   bool _isInitialized = false; 
 
+  // --- Callback Fonksiyonları ---
   Function(String callerId)? onCallReceived;
   Function(String senderId, String filePath, String messageId)? onAudioPlayed;
   Function(String messageId, String readerId, String? readerName, bool isLiveRead)? onAudioRead; 
@@ -29,22 +31,27 @@ class SocketService {
   Function(String callerId, bool isSpeaking)? onUserSpeaking;
   Function(String senderId, String senderName)? onNudgeReceived;
   Function(String senderId, String senderName)? onRogerThatReceived;
-  
-  // 🟢 YENİ: Uçuşan Emojileri Yakalamak İçin Fonksiyon
   Function(String senderId, String emoji)? onReactionReceived;
+  Function(String userId, String status)? onUserStatusChanged;
+  
 
-  Future<void> initConnection(String myPhone) async {
+  /// 🟢 [KRİTİK GÜNCELLEME]: Artık dışarıdan bilet (token) bekliyoruz
+  Future<void> initConnection(String myPhone, String token) async {
     if (_isInitialized) return;
     _isInitialized = true;
 
     myUserId = myPhone;
     
-    // ⚠️ IP ADRESİNİ GÜNCEL TUTTUĞUNDAN EMİN OL
-    String serverUrl =  'http://192.168.1.7:3000';
+    // 🚀 HEDEF: DigitalOcean Ana Karargah Adresi
+    String serverUrl = 'http://188.166.101.147:3005';
     
     socket = socket_io.io(serverUrl, <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': false,
+      // 🛂 [GÜMRÜK GEÇİŞİ]: Bağlantı kurulurken bileti burada gösteriyoruz
+      'auth': {
+        'token': token
+      },
     });
 
     socket.connect();
@@ -54,6 +61,9 @@ class SocketService {
       _registerWithToken();
     });
 
+    
+
+    // --- Dinleyiciler (Listeners) ---
     socket.on('user_speaking', (data) { 
       if (onUserSpeaking != null) onUserSpeaking!(data['callerId'], data['isSpeaking']); 
     });
@@ -69,17 +79,26 @@ class SocketService {
         onRogerThatReceived!(data['senderId'], data['senderName']);
       }
     });
+
+    // 🟢 GERÇEK ZAMANLI DURUM DİNLEYİCİSİ
+    socket.on('user_status', (data) {
+      if (onUserStatusChanged != null && data != null) {
+        onUserStatusChanged!(data['userId'].toString(), data['status'].toString());
+      }
+    });
     
-    // 🟢 YENİ: Karşıdan gelen emoji reaksiyonlarını dinle
     socket.on('receiveReaction', (data) {
       if (onReactionReceived != null && data != null) {
         onReactionReceived!(data['senderId'], data['emoji']);
       }
     });
-
+    
     socket.onConnectError((err) => debugPrint('❌ Soket Bağlantı Hatası: $err'));
     socket.onError((err) => debugPrint('❌ Soket Genel Hata: $err'));
-    socket.onDisconnect((_) => debugPrint('🔴 Sunucu bağlantısı koptu.'));
+    socket.onDisconnect((_) {
+      _isInitialized = false; // Bağlantı koparsa tekrar init edilsin
+      debugPrint('🔴 Sunucu bağlantısı koptu.');
+    });
 
     socket.on('incoming_call', (data) { if (onCallReceived != null) onCallReceived!(data['callerId']); });
     socket.on('call_accepted', (data) { if (onCallAccepted != null) onCallAccepted!(data['targetId']); });
@@ -89,12 +108,7 @@ class SocketService {
     
     socket.on('audio_read', (data) { 
       if (onAudioRead != null && data != null) {
-        onAudioRead!(
-          data['messageId'], 
-          data['readerId'] ?? 'unknown', 
-          data['readerName'], 
-          data['isLiveRead'] ?? false
-        ); 
+        onAudioRead!(data['messageId'], data['readerId'] ?? 'unknown', data['readerName'], data['isLiveRead'] ?? false); 
       }
     });
 
@@ -102,22 +116,18 @@ class SocketService {
       try {
         String audioUrl = data['audioUrl']; 
         String msgId = data['messageId'] ?? DateTime.now().millisecondsSinceEpoch.toString();
-        
         Directory docDir = await getApplicationDocumentsDirectory();
         File audioFile = File('${docDir.path}/incoming_audio_$msgId.m4a');
-        
         var response = await http.get(Uri.parse(audioUrl));
         await audioFile.writeAsBytes(response.bodyBytes, flush: true);
-        
-        if (onAudioPlayed != null) {
-          onAudioPlayed!(data['callerId'], audioFile.path, msgId);
-        }
+        if (onAudioPlayed != null) onAudioPlayed!(data['callerId'], audioFile.path, msgId);
       } catch (e) {
         debugPrint('❌ Ses indirme hatası: $e');
       }
     });
   }
 
+  /// Bildirimler için FCM kaydı
   Future<void> _registerWithToken() async {
     String? fcmToken;
     try {
@@ -125,31 +135,22 @@ class SocketService {
     } catch (e) {
       debugPrint("⚠️ FCM Token alınamadı: $e");
     }
+    // UserId ve FCM Token sunucuya bildiriliyor
     socket.emit('register', { 'userId': myUserId, 'fcmToken': fcmToken });
   }
 
+  // --- Gönderim Fonksiyonları (Emitters) ---
   void startCall(String targetUserId) { socket.emit('start_call', { 'callerId': myUserId, 'targetId': targetUserId }); }
   void acceptCall(String callerId) { socket.emit('accept_call', { 'callerId': callerId, 'targetId': myUserId }); }
   void rejectCall(String callerId) { socket.emit('reject_call', { 'callerId': callerId, 'targetId': myUserId }); }
   void cancelCall(String targetUserId) { socket.emit('cancel_call', { 'callerId': myUserId, 'targetId': targetUserId }); }
 
   void sendAudio(String targetUserId, String audioUrl, String messageId) {
-    socket.emit('send_audio', { 
-      'callerId': myUserId, 
-      'targetId': targetUserId, 
-      'audioUrl': audioUrl, 
-      'messageId': messageId 
-    });
+    socket.emit('send_audio', { 'callerId': myUserId, 'targetId': targetUserId, 'audioUrl': audioUrl, 'messageId': messageId });
   }
 
   void sendAudioRead(String targetUserId, String messageId, bool isLiveRead, String readerName) { 
-    socket.emit('audio_read', { 
-      'targetId': targetUserId, 
-      'messageId': messageId,
-      'readerId': myUserId,
-      'readerName': readerName,
-      'isLiveRead': isLiveRead
-    }); 
+    socket.emit('audio_read', { 'targetId': targetUserId, 'messageId': messageId, 'readerId': myUserId, 'readerName': readerName, 'isLiveRead': isLiveRead }); 
   }
   
   Future<void> stopAudio() async { await _audioPlayer.release(); }
@@ -160,33 +161,18 @@ class SocketService {
   }
 
   void sendSpeakingState(String targetUserId, bool isSpeaking) {
-    socket.emit('user_speaking', { 
-      'callerId': myUserId, 'targetId': targetUserId, 'isSpeaking': isSpeaking 
-    });
+    socket.emit('user_speaking', { 'callerId': myUserId, 'targetId': targetUserId, 'isSpeaking': isSpeaking });
   }
   
   void sendNudge(String targetId, String senderId, String senderName) {
-    socket.emit('sendNudge', {
-      'targetId': targetId,
-      'senderId': senderId,
-      'senderName': senderName
-    });
+    socket.emit('sendNudge', { 'targetId': targetId, 'senderId': senderId, 'senderName': senderName });
   }
 
   void sendRogerThat(String targetId, String senderId, String senderName) {
-    socket.emit('sendRogerThat', {
-      'targetId': targetId,
-      'senderId': senderId,
-      'senderName': senderName
-    });
+    socket.emit('sendRogerThat', { 'targetId': targetId, 'senderId': senderId, 'senderName': senderName });
   }
   
-  // 🟢 YENİ: Emoji Reaksiyonunu Karşıya Gönder
   void sendReaction(String targetId, String senderId, String emoji) {
-    socket.emit('sendReaction', {
-      'targetId': targetId,
-      'senderId': senderId,
-      'emoji': emoji
-    });
+    socket.emit('sendReaction', { 'targetId': targetId, 'senderId': senderId, 'emoji': emoji });
   }
 }

@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:adapty_flutter/adapty_flutter.dart'; // 🟢 ADAPTY EKLENDİ
 import 'dart:ui';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
-import 'orbit_main_screen.dart'; // Ana ekrana geçiş için
-import 'package:purchases_flutter/purchases_flutter.dart';
+import 'orbit_main_screen.dart';
 
 class OrbitPlusScreen extends StatefulWidget {
   const OrbitPlusScreen({super.key});
@@ -20,9 +18,8 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
   late Animation<Offset> _slideAnimation;
 
   String _currentLang = 'tr';
-  bool _isLoading = false; // 🟢 Satın alma sırasında butonu kilitlemek için
+  bool _isLoading = false; 
 
-  // 🟢 ORBIT PLUS ÇEVİRİ SÖZLÜĞÜ
   final Map<String, Map<String, String>> _texts = {
     'title': {'tr': 'Orbit Plus', 'en': 'Orbit Plus', 'de': 'Orbit Plus', 'ru': 'Orbit Plus'},
     'subtitle': {'tr': 'Sınırları Aşan Kesintisiz İletişim', 'en': 'Seamless Communication Beyond Limits', 'de': 'Nahtlose Kommunikation über Grenzen hinweg', 'ru': 'Бесшовная связь без границ'},
@@ -35,7 +32,8 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
     'feat_4_title': {'tr': 'Yüksek Kaliteli Ses', 'en': 'High-Quality Audio'},
     'feat_4_desc': {'tr': 'Kristal netliğinde, stüdyo kalitesinde ses iletimi deneyimleyin.', 'en': 'Experience crystal clear, studio-quality audio transmission.'},
     'btn_upgrade': {'tr': 'Orbit Plus\'a Geç', 'en': 'Upgrade to Orbit Plus'},
-    'btn_skip': {'tr': 'Geri Dön', 'en': 'Go Back'}, // "Şimdilik Ücretsiz Kullan" yerine "Geri Dön" daha mantıklı çünkü bu ekranı her zaman açabilir
+    'btn_skip': {'tr': 'Geri Dön', 'en': 'Go Back'},
+    'restore': {'tr': 'Satın Almaları Geri Yükle', 'en': 'Restore Purchases'},
   };
 
   String _t(String key) {
@@ -49,17 +47,12 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
     _animController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200));
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
     _slideAnimation = Tween<Offset>(begin: const Offset(0, 0.2), end: Offset.zero).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic));
-    
     _animController.forward();
   }
 
   Future<void> _loadLanguage() async {
     final prefs = await SharedPreferences.getInstance();
-    if (mounted) {
-      setState(() {
-        _currentLang = prefs.getString('app_lang') ?? 'tr';
-      });
-    }
+    if (mounted) setState(() => _currentLang = prefs.getString('app_lang') ?? 'tr');
   }
 
   @override
@@ -69,73 +62,61 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
   }
 
   void _goBack() {
-    if (Navigator.canPop(context)) {
-      Navigator.pop(context); // Eğer bir önceki sayfa varsa sadece geri dön
-    } else {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const OrbitMainScreen()));
-    }
+    if (Navigator.canPop(context)) Navigator.pop(context); 
+    else Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const OrbitMainScreen()));
   }
 
- Future<void> _startPurchaseFlow() async {
-    setState(() {
-      _isLoading = true;
-    });
+  // 🚀 GERÇEK SATIN ALMA AKIŞI
+  Future<void> _startPurchaseFlow() async {
+    setState(() => _isLoading = true);
 
     try {
-      // 1. Mağazadaki paketleri (Offerings) getir
-      Offerings offerings = await Purchases.getOfferings();
-      
-      if (offerings.current != null && offerings.current!.availablePackages.isNotEmpty) {
-        // 2. İlk paketi satın alması için yeni nesil PurchaseParams ile Apple/Google ekranını aç
-        PurchaseParams params = PurchaseParams.package(offerings.current!.availablePackages[0]);
-        PurchaseResult result = await Purchases.purchase(params);
-        CustomerInfo customerInfo = result.customerInfo;
-        
-        // 3. Ödeme başarılıysa ve yetki ("orbit_plus") verildiyse sistemi aç
-        if (customerInfo.entitlements.all["orbit_plus"]?.isActive == true) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool('is_orbit_plus', true); // Plus yetkisini cihaza kaydet
+      // 1. Adapty'den Paywall ve Ürünleri çek
+      // DİKKAT: 'default_placement' Adapty panelindeki Placement ID ile aynı olmalı.
+      final paywall = await Adapty().getPaywall(placementId: 'default_placement');
+      final products = await Adapty().getPaywallProducts(paywall: paywall);
 
-          // 🛡️ GÜVENLİK ZIRHI: Bulut Veritabanını Güncelle (Sadece Sen Dokunabilirsin)
-          try {
-            final user = FirebaseAuth.instance.currentUser;
-            if (user != null) {
-              await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
-                'isPremium': true,
-                'plusActivationDate': FieldValue.serverTimestamp(),
-              });
-            }
-          } catch (e) {
-            debugPrint("Bulut güncelleme hatası (Yine de Plus aktif): $e");
-          }
-          
+      if (products.isNotEmpty) {
+        // 2. Ödeme ekranını başlat
+        final profile = await Adapty().makePurchase(product: products.first);
+
+        // 3. Başarılıysa yetkiyi kontrol et ve kaydet
+        if (profile.accessLevels['premium']?.isActive == true) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('is_orbit_plus', true);
+
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Aramıza Hoş Geldin! Orbit Plus Aktif."), backgroundColor: Colors.green)
-            );
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Aramıza hoş geldin Komutan! Orbit Plus devrede."), backgroundColor: Colors.amber));
             _goBack();
           }
         }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Şu an satın alınabilir bir paket bulunamadı."), backgroundColor: Colors.orange)
-          );
-        }
       }
     } catch (e) {
-      // Kullanıcı ödemeyi iptal ederse veya kart reddedilirse buraya düşer
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Ödeme işlemi iptal edildi veya başarısız oldu."), backgroundColor: Colors.redAccent)
-        );
-      }
+      debugPrint("Satın alma hatası: $e");
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // 🛡️ GERİ YÜKLEME (APPLE ONAYI İÇİN ŞART)
+  Future<void> _restorePurchases() async {
+    setState(() => _isLoading = true);
+    try {
+      final profile = await Adapty().restorePurchases();
+      if (profile.accessLevels['premium']?.isActive == true) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('is_orbit_plus', true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Aboneliğiniz başarıyla geri yüklendi."), backgroundColor: Colors.greenAccent));
+          _goBack();
+        }
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Geri yüklenecek aktif abonelik bulunamadı."), backgroundColor: Colors.orange));
       }
+    } catch (e) {
+      debugPrint("Geri yükleme hatası: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -147,11 +128,7 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
         children: [
           Container(
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.amber.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
-            ),
+            decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.1), shape: BoxShape.circle, border: Border.all(color: Colors.amber.withValues(alpha: 0.3))),
             child: Icon(icon, color: Colors.amber, size: 24),
           ),
           const SizedBox(width: 16),
@@ -176,16 +153,8 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // Arka Plan Efekti (Cyan yerine Amber (Gold) temasına geçirildi)
-          Positioned(
-            top: -100, right: -50,
-            child: Container(
-              width: 300, height: 300,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.amber.withValues(alpha: 0.05)),
-            ),
-          ),
+          Positioned(top: -100, right: -50, child: Container(width: 300, height: 300, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.amber.withValues(alpha: 0.05)))),
           Positioned.fill(child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 80, sigmaY: 80), child: const SizedBox())),
-
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
@@ -202,24 +171,16 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               const SizedBox(height: 20),
-                              // Logo ve Başlık
                               Container(
                                 padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  gradient: LinearGradient(colors: [Colors.amber.withValues(alpha: 0.8), Colors.orangeAccent.withValues(alpha: 0.8)]),
-                                  boxShadow: [BoxShadow(color: Colors.amber.withValues(alpha: 0.3), blurRadius: 30, spreadRadius: 5)],
-                                ),
+                                decoration: BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [Colors.amber.withValues(alpha: 0.8), Colors.orangeAccent.withValues(alpha: 0.8)]), boxShadow: [BoxShadow(color: Colors.amber.withValues(alpha: 0.3), blurRadius: 30, spreadRadius: 5)]),
                                 child: const Icon(Icons.stars_rounded, color: Colors.black, size: 48),
                               ),
                               const SizedBox(height: 24),
                               Text(_t('title'), style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
                               const SizedBox(height: 8),
                               Text(_t('subtitle'), textAlign: TextAlign.center, style: const TextStyle(color: Colors.amber, fontSize: 14, fontWeight: FontWeight.w500)),
-                              
                               const SizedBox(height: 40),
-
-                              // Özellikler Listesi
                               _buildFeatureRow(Icons.mic_off, 'feat_1_title', 'feat_1_desc'),
                               _buildFeatureRow(Icons.groups, 'feat_2_title', 'feat_2_desc'),
                               _buildFeatureRow(Icons.all_inbox, 'feat_3_title', 'feat_3_desc'),
@@ -230,34 +191,30 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
                       ),
                     ),
                   ),
-
-                  // Alt Butonlar
                   FadeTransition(
                     opacity: _fadeAnimation,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         SizedBox(
-                          width: double.infinity,
-                          height: 56,
+                          width: double.infinity, height: 56,
                           child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.amber,
-                              foregroundColor: Colors.black,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                              elevation: 10,
-                              shadowColor: Colors.amber.withValues(alpha: 0.5),
-                            ),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 10, shadowColor: Colors.amber.withValues(alpha: 0.5)),
                             onPressed: _isLoading ? null : _startPurchaseFlow,
                             child: _isLoading 
                                 ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
                                 : Text(_t('btn_upgrade'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
                           ),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 12),
                         TextButton(
                           onPressed: _goBack,
                           child: Text(_t('btn_skip'), style: const TextStyle(color: Colors.white54, fontSize: 14, fontWeight: FontWeight.w600)),
+                        ),
+                        // 🟢 GERİ YÜKLEME BUTONU (APPLE İÇİN ZORUNLU)
+                        TextButton(
+                          onPressed: _isLoading ? null : _restorePurchases,
+                          child: Text(_t('restore'), style: const TextStyle(color: Colors.white30, fontSize: 12, decoration: TextDecoration.underline)),
                         ),
                         const SizedBox(height: 10),
                       ],

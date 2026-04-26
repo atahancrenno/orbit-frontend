@@ -151,11 +151,11 @@ class CurvedTextPainter extends CustomPainter {
     canvas.translate(size.width / 2, size.height / 2);
     final textPainter = TextPainter(textDirection: TextDirection.ltr);
     
-    // 🟢 DÜZELTME: Metnin başındaki o ekstra "Status" noktası kaldırıldı, sadece harfler kaldı.
     int totalSteps = text.length; 
     double stepAngle = 0.17;
     double totalSweep = (totalSteps - 1) * stepAngle;
     
+    // Başlangıç açısını merkeze aldık (Nokta veya fazlalık yok, sadece harfler)
     double startAngle = baseAngle - (totalSweep / 2);
     
     for (int i = 0; i < totalSteps; i++) {
@@ -175,11 +175,7 @@ class CurvedTextPainter extends CustomPainter {
           fontWeight: FontWeight.bold, 
           letterSpacing: 1.2,
           shadows: const [
-            Shadow(
-              color: Colors.black87,
-              blurRadius: 4.0,
-              offset: Offset(1.0, 1.0),
-            ),
+            Shadow(color: Colors.black87, blurRadius: 4.0, offset: Offset(1.0, 1.0)),
           ],
         ),
       );
