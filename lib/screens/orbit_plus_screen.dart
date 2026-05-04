@@ -66,22 +66,18 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
     else Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const OrbitMainScreen()));
   }
 
-  // 🚀 GERÇEK SATIN ALMA AKIŞI
+  // 🚀 GERÇEK SATIN ALMA AKIŞI (ADAPTY V3)
   Future<void> _startPurchaseFlow() async {
     setState(() => _isLoading = true);
 
     try {
-      // 1. Adapty'den Paywall ve Ürünleri çek
-      // DİKKAT: 'default_placement' Adapty panelindeki Placement ID ile aynı olmalı.
       final paywall = await Adapty().getPaywall(placementId: 'default_placement');
       final products = await Adapty().getPaywallProducts(paywall: paywall);
 
       if (products.isNotEmpty) {
-        // 2. Ödeme ekranını başlat
-        final profile = await Adapty().makePurchase(product: products.first);
+        final result = await Adapty().makePurchase(product: products.first);
 
-        // 3. Başarılıysa yetkiyi kontrol et ve kaydet
-        if (profile.accessLevels['premium']?.isActive == true) {
+        if (result is AdaptyPurchaseResultSuccess && result.profile.accessLevels['premium']?.isActive == true) {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setBool('is_orbit_plus', true);
 
@@ -98,7 +94,7 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
     }
   }
 
-  // 🛡️ GERİ YÜKLEME (APPLE ONAYI İÇİN ŞART)
+  // 🛡️ GERİ YÜKLEME (ADAPTY V3)
   Future<void> _restorePurchases() async {
     setState(() => _isLoading = true);
     try {
@@ -211,7 +207,6 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
                           onPressed: _goBack,
                           child: Text(_t('btn_skip'), style: const TextStyle(color: Colors.white54, fontSize: 14, fontWeight: FontWeight.w600)),
                         ),
-                        // 🟢 GERİ YÜKLEME BUTONU (APPLE İÇİN ZORUNLU)
                         TextButton(
                           onPressed: _isLoading ? null : _restorePurchases,
                           child: Text(_t('restore'), style: const TextStyle(color: Colors.white30, fontSize: 12, decoration: TextDecoration.underline)),

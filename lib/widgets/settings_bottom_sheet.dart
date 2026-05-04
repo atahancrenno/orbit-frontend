@@ -10,7 +10,6 @@ import 'package:flutter_html/flutter_html.dart';
 import '../constants/legal_texts.dart'; 
 
 import '../screens/orbit_plus_screen.dart'; 
-// 🛡️ ADAPTY MERKEZİ KONTROL KULESİ EKLENDİ
 import '../services/subscription_service.dart';
 
 class SettingsBottomSheet extends StatefulWidget {
@@ -62,17 +61,22 @@ class SettingsBottomSheet extends StatefulWidget {
   final int deleteFilterDays;
   final ValueChanged<int> onDeleteFilterDaysChanged;
   final ValueChanged<int> onClearOldMessages;
+  
   final String? customBackgroundImagePath;
   final Future<String?> Function() onPickBackground;
   final VoidCallback onRemoveBackground;
+  
+  final Color? globalBgColor;
+  final ValueChanged<Color?> onGlobalBgColorChanged;
+  
   final VoidCallback onClosed;
 
   const SettingsBottomSheet({
-    super.key, required this.userName, this.userAvatarPath, required this.customAvatarColor, required this.onCustomAvatarColorChanged, required this.myStatus, required this.onUserNameChanged, required this.onPickFromGallery, required this.onPickFromCamera, required this.onRemoveAvatar, required this.onStatusChanged, required this.isLeftHanded, required this.onLeftHandedChanged, required this.selectedLiveAnimation, required this.animationOptions, required this.onLiveAnimationChanged, required this.isBackgroundTransparent, required this.onBackgroundTransparentChanged, required this.isCircularMessageStyle, required this.onCircularMessageStyleChanged, required this.hapticEnabled, required this.onHapticChanged, required this.ratchetEnabled, required this.onRatchetChanged, required this.useSpeaker, required this.onSpeakerChanged, required this.selfDestructSeconds, required this.onSelfDestructChanged, required this.liveAudioPermission, required this.onLivePermissionChanged, required this.notificationsEnabled, required this.onNotificationsChanged, required this.messageNotificationsEnabled, required this.onMessageNotificationsChanged, required this.callNotificationsEnabled, required this.onCallNotificationsChanged, required this.callRingtone, required this.onRingtoneChanged, required this.deleteFilterDays, required this.onDeleteFilterDaysChanged, required this.onClearOldMessages, this.customBackgroundImagePath, required this.onPickBackground, required this.onRemoveBackground, required this.onClosed,
+    super.key, required this.userName, this.userAvatarPath, required this.customAvatarColor, required this.onCustomAvatarColorChanged, required this.myStatus, required this.onUserNameChanged, required this.onPickFromGallery, required this.onPickFromCamera, required this.onRemoveAvatar, required this.onStatusChanged, required this.isLeftHanded, required this.onLeftHandedChanged, required this.selectedLiveAnimation, required this.animationOptions, required this.onLiveAnimationChanged, required this.isBackgroundTransparent, required this.onBackgroundTransparentChanged, required this.isCircularMessageStyle, required this.onCircularMessageStyleChanged, required this.hapticEnabled, required this.onHapticChanged, required this.ratchetEnabled, required this.onRatchetChanged, required this.useSpeaker, required this.onSpeakerChanged, required this.selfDestructSeconds, required this.onSelfDestructChanged, required this.liveAudioPermission, required this.onLivePermissionChanged, required this.notificationsEnabled, required this.onNotificationsChanged, required this.messageNotificationsEnabled, required this.onMessageNotificationsChanged, required this.callNotificationsEnabled, required this.onCallNotificationsChanged, required this.callRingtone, required this.onRingtoneChanged, required this.deleteFilterDays, required this.onDeleteFilterDaysChanged, required this.onClearOldMessages, this.customBackgroundImagePath, required this.onPickBackground, required this.onRemoveBackground, this.globalBgColor, required this.onGlobalBgColorChanged, required this.onClosed,
   });
 
   static void show({
-    required BuildContext context, required String userName, String? userAvatarPath, required Color customAvatarColor, required ValueChanged<Color> onCustomAvatarColorChanged, required String myStatus, required ValueChanged<String> onUserNameChanged, required Future<String?> Function() onPickFromGallery, required Future<String?> Function() onPickFromCamera, required VoidCallback onRemoveAvatar, required ValueChanged<String> onStatusChanged, required bool isLeftHanded, required ValueChanged<bool> onLeftHandedChanged, required String selectedLiveAnimation, required List<String> animationOptions, required ValueChanged<String> onLiveAnimationChanged, required bool isBackgroundTransparent, required ValueChanged<bool> onBackgroundTransparentChanged, required bool isCircularMessageStyle, required ValueChanged<bool> onCircularMessageStyleChanged, required bool hapticEnabled, required ValueChanged<bool> onHapticChanged, required bool ratchetEnabled, required ValueChanged<bool> onRatchetChanged, required bool useSpeaker, required ValueChanged<bool> onSpeakerChanged, required int selfDestructSeconds, required ValueChanged<int> onSelfDestructChanged, required String liveAudioPermission, required ValueChanged<String> onLivePermissionChanged, required bool notificationsEnabled, required ValueChanged<bool> onNotificationsChanged, required bool messageNotificationsEnabled, required ValueChanged<bool> onMessageNotificationsChanged, required bool callNotificationsEnabled, required ValueChanged<bool> onCallNotificationsChanged, required String callRingtone, required ValueChanged<String> onRingtoneChanged, required int deleteFilterDays, required ValueChanged<int> onDeleteFilterDaysChanged, required ValueChanged<int> onClearOldMessages, String? customBackgroundImagePath, required Future<String?> Function() onPickBackground, required VoidCallback onRemoveBackground, required VoidCallback onClosed,
+    required BuildContext context, required String userName, String? userAvatarPath, required Color customAvatarColor, required ValueChanged<Color> onCustomAvatarColorChanged, required String myStatus, required ValueChanged<String> onUserNameChanged, required Future<String?> Function() onPickFromGallery, required Future<String?> Function() onPickFromCamera, required VoidCallback onRemoveAvatar, required ValueChanged<String> onStatusChanged, required bool isLeftHanded, required ValueChanged<bool> onLeftHandedChanged, required String selectedLiveAnimation, required List<String> animationOptions, required ValueChanged<String> onLiveAnimationChanged, required bool isBackgroundTransparent, required ValueChanged<bool> onBackgroundTransparentChanged, required bool isCircularMessageStyle, required ValueChanged<bool> onCircularMessageStyleChanged, required bool hapticEnabled, required ValueChanged<bool> onHapticChanged, required bool ratchetEnabled, required ValueChanged<bool> onRatchetChanged, required bool useSpeaker, required ValueChanged<bool> onSpeakerChanged, required int selfDestructSeconds, required ValueChanged<int> onSelfDestructChanged, required String liveAudioPermission, required ValueChanged<String> onLivePermissionChanged, required bool notificationsEnabled, required ValueChanged<bool> onNotificationsChanged, required bool messageNotificationsEnabled, required ValueChanged<bool> onMessageNotificationsChanged, required bool callNotificationsEnabled, required ValueChanged<bool> onCallNotificationsChanged, required String callRingtone, required ValueChanged<String> onRingtoneChanged, required int deleteFilterDays, required ValueChanged<int> onDeleteFilterDaysChanged, required ValueChanged<int> onClearOldMessages, String? customBackgroundImagePath, required Future<String?> Function() onPickBackground, required VoidCallback onRemoveBackground, Color? globalBgColor, required ValueChanged<Color?> onGlobalBgColorChanged, required VoidCallback onClosed,
   }) {
     showModalBottomSheet(
       context: context,
@@ -80,7 +84,7 @@ class SettingsBottomSheet extends StatefulWidget {
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withValues(alpha: 0.5),
       builder: (context) => SettingsBottomSheet(
-        userName: userName, userAvatarPath: userAvatarPath, customAvatarColor: customAvatarColor, onCustomAvatarColorChanged: onCustomAvatarColorChanged, myStatus: myStatus, onUserNameChanged: onUserNameChanged, onPickFromGallery: onPickFromGallery, onPickFromCamera: onPickFromCamera, onRemoveAvatar: onRemoveAvatar, onStatusChanged: onStatusChanged, isLeftHanded: isLeftHanded, onLeftHandedChanged: onLeftHandedChanged, selectedLiveAnimation: selectedLiveAnimation, animationOptions: animationOptions, onLiveAnimationChanged: onLiveAnimationChanged, isBackgroundTransparent: isBackgroundTransparent, onBackgroundTransparentChanged: onBackgroundTransparentChanged, isCircularMessageStyle: isCircularMessageStyle, onCircularMessageStyleChanged: onCircularMessageStyleChanged, hapticEnabled: hapticEnabled, onHapticChanged: onHapticChanged, ratchetEnabled: ratchetEnabled, onRatchetChanged: onRatchetChanged, useSpeaker: useSpeaker, onSpeakerChanged: onSpeakerChanged, selfDestructSeconds: selfDestructSeconds, onSelfDestructChanged: onSelfDestructChanged, liveAudioPermission: liveAudioPermission, onLivePermissionChanged: onLivePermissionChanged, notificationsEnabled: notificationsEnabled, onNotificationsChanged: onNotificationsChanged, messageNotificationsEnabled: messageNotificationsEnabled, onMessageNotificationsChanged: onMessageNotificationsChanged, callNotificationsEnabled: callNotificationsEnabled, onCallNotificationsChanged: onCallNotificationsChanged, callRingtone: callRingtone, onRingtoneChanged: onRingtoneChanged, deleteFilterDays: deleteFilterDays, onDeleteFilterDaysChanged: onDeleteFilterDaysChanged, onClearOldMessages: onClearOldMessages, customBackgroundImagePath: customBackgroundImagePath, onPickBackground: onPickBackground, onRemoveBackground: onRemoveBackground, onClosed: onClosed,
+        userName: userName, userAvatarPath: userAvatarPath, customAvatarColor: customAvatarColor, onCustomAvatarColorChanged: onCustomAvatarColorChanged, myStatus: myStatus, onUserNameChanged: onUserNameChanged, onPickFromGallery: onPickFromGallery, onPickFromCamera: onPickFromCamera, onRemoveAvatar: onRemoveAvatar, onStatusChanged: onStatusChanged, isLeftHanded: isLeftHanded, onLeftHandedChanged: onLeftHandedChanged, selectedLiveAnimation: selectedLiveAnimation, animationOptions: animationOptions, onLiveAnimationChanged: onLiveAnimationChanged, isBackgroundTransparent: isBackgroundTransparent, onBackgroundTransparentChanged: onBackgroundTransparentChanged, isCircularMessageStyle: isCircularMessageStyle, onCircularMessageStyleChanged: onCircularMessageStyleChanged, hapticEnabled: hapticEnabled, onHapticChanged: onHapticChanged, ratchetEnabled: ratchetEnabled, onRatchetChanged: onRatchetChanged, useSpeaker: useSpeaker, onSpeakerChanged: onSpeakerChanged, selfDestructSeconds: selfDestructSeconds, onSelfDestructChanged: onSelfDestructChanged, liveAudioPermission: liveAudioPermission, onLivePermissionChanged: onLivePermissionChanged, notificationsEnabled: notificationsEnabled, onNotificationsChanged: onNotificationsChanged, messageNotificationsEnabled: messageNotificationsEnabled, onMessageNotificationsChanged: onMessageNotificationsChanged, callNotificationsEnabled: callNotificationsEnabled, onCallNotificationsChanged: onCallNotificationsChanged, callRingtone: callRingtone, onRingtoneChanged: onRingtoneChanged, deleteFilterDays: deleteFilterDays, onDeleteFilterDaysChanged: onDeleteFilterDaysChanged, onClearOldMessages: onClearOldMessages, customBackgroundImagePath: customBackgroundImagePath, onPickBackground: onPickBackground, onRemoveBackground: onRemoveBackground, globalBgColor: globalBgColor, onGlobalBgColorChanged: onGlobalBgColorChanged, onClosed: onClosed,
       ),
     ).whenComplete(onClosed);
   }
@@ -111,7 +115,12 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
   late bool _callNotificationsEnabled;
   late String _callRingtone; 
   
-  // 🟢 6 DİL MOTORU DEĞİŞKENLERİ
+  // 🟢 YENİ EKLENEN STATE: Arka plan rengi seçildiğinde tik işaretinin anında güncellenmesi için
+  Color? _currentGlobalBgColor;
+
+  final GlobalKey _hesapYonetimiKey = GlobalKey();
+  final ScrollController _sheetScrollController = ScrollController();
+  
   String _lang = 'tr';
   final List<Map<String, String>> _availableLangs = [
     {'code': 'tr', 'name': 'Türkçe', 'flag': '🇹🇷'},
@@ -128,7 +137,16 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
     Colors.orangeAccent, Colors.greenAccent.shade700, Colors.tealAccent.shade700
   ];
 
-  // 🟢 PREMIUM TEMALAR LİSTESİ
+  final List<Map<String, dynamic>> _globalBgColorsList = [
+    {"name": "Klasik Siyah", "color": Colors.white30, "bgValue": Colors.black},
+    {"name": "Saf Gri", "color": Colors.grey, "bgValue": Colors.grey.shade800},
+    {"name": "Canlı Mavi", "color": Colors.blue, "bgValue": Colors.blue},
+    {"name": "Canlı Yeşil", "color": Colors.green, "bgValue": Colors.green},
+    {"name": "Canlı Kırmızı", "color": Colors.red, "bgValue": Colors.red},
+    {"name": "Saf Mor", "color": Colors.purple, "bgValue": Colors.purple},
+    {"name": "Canlı Turuncu", "color": Colors.orange, "bgValue": Colors.orange},
+  ];
+
   final List<Map<String, dynamic>> _plusThemes = [
     {'name': 'Neon Siberpunk', 'colors': [Colors.pinkAccent, Colors.cyanAccent]},
     {'name': 'Midnight Gold', 'colors': [Colors.black87, Colors.amber]},
@@ -160,6 +178,8 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
     _messageNotificationsEnabled = widget.messageNotificationsEnabled;
     _callNotificationsEnabled = widget.callNotificationsEnabled;
     _callRingtone = widget.callRingtone; 
+    
+    _currentGlobalBgColor = widget.globalBgColor; // Başlangıç rengini atadık
   }
   
   Future<void> _loadLanguagePreference() async {
@@ -190,7 +210,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
       'stor': {'tr': 'Depolama ve Veri', 'en': 'Storage & Data', 'de': 'Speicher & Daten', 'ru': 'Хранилище и данные', 'es': 'Almacenamiento y datos', 'ar': 'التخزين والبيانات'},
       'acc': {'tr': 'Hesap Yönetimi', 'en': 'Account Management', 'de': 'Kontoverwaltung', 'ru': 'Управление аккаунтом', 'es': 'Gestión de cuentas', 'ar': 'إدارة الحساب'},
       
-      // Profil ve Temalar
       'cam': {'tr': 'Kameradan Çek', 'en': 'Take Photo', 'de': 'Foto machen', 'ru': 'Сделать фото', 'es': 'Tomar foto', 'ar': 'التقاط صورة'},
       'gal': {'tr': 'Galeriden Seç', 'en': 'Choose from Gallery', 'de': 'Aus Galerie wählen', 'ru': 'Выбрать из галереи', 'es': 'Elegir de la galería', 'ar': 'اختر من المعرض'},
       'del_pic': {'tr': 'Fotoğrafı Sil', 'en': 'Remove Photo', 'de': 'Foto löschen', 'ru': 'Удалить фото', 'es': 'Eliminar foto', 'ar': 'إزالة الصورة'},
@@ -203,20 +222,22 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
       'st_bu': {'tr': 'Meşgul', 'en': 'Busy', 'de': 'Beschäftigt', 'ru': 'Занят', 'es': 'Ocupado', 'ar': 'مشغول'},
       'st_aw': {'tr': 'Uzakta', 'en': 'Away', 'de': 'Abwesend', 'ru': 'Нет на месте', 'es': 'Ausente', 'ar': 'بعيد'},
 
-      // Yeni Eklenen Dialog Çevirileri
-      'theme_dialog_desc': {'tr': 'Bu premium tasarımı Orbit Plus ile sınırsız kullanabilir veya kısa bir reklam izleyerek 2 saat boyunca deneyimleyebilirsiniz.', 'en': 'You can use this premium design unlimitedly with Orbit Plus, or experience it for 2 hours by watching a short ad.', 'de': 'Sie können dieses Premium-Design mit Orbit Plus unbegrenzt nutzen oder 2 Stunden lang testen, indem Sie sich eine kurze Anzeige ansehen.', 'ru': 'Вы можете использовать этот премиум-дизайн неограниченно с Orbit Plus или испытать его в течение 2 часов, посмотрев короткую рекламу.', 'es': 'Puedes usar este diseño premium de forma ilimitada con Orbit Plus, o experimentarlo durante 2 horas viendo un breve anuncio.', 'ar': 'يمكنك استخدام هذا التصميم المتميز بلا حدود مع Orbit Plus ، أو تجربته لمدة ساعتين من خلال مشاهدة إعلان قصير.'},
+      'theme_dialog_desc': {'tr': 'Bu premium tasarımı Orbit Plus ile sınırsız kullanabilir veya kısa bir reklam izleyerek 1 gün boyunca deneyimleyebilirsiniz.', 'en': 'You can use this premium design unlimitedly with Orbit Plus, or experience it for 1 day by watching a short ad.', 'de': 'Sie können dieses Premium-Design mit Orbit Plus unbegrenzt nutzen oder 1 Tag lang testen, indem Sie sich eine kurze Anzeige ansehen.', 'ru': 'Вы можете использовать этот премиум-дизайн неограниченно с Orbit Plus или испытать его в течение 1 дня, посмотрев короткую рекламу.', 'es': 'Puedes usar este diseño premium de forma ilimitada con Orbit Plus, o experimentarlo durante 1 día viendo un breve anuncio.', 'ar': 'يمكنك استخدام هذا التصميم المتميز بلا حدود مع Orbit Plus ، أو تجربته لمدة يوم واحد من خلال مشاهدة إعلان قصير.'},
       'go_plus': {'tr': 'Plus\'a Geç', 'en': 'Upgrade to Plus', 'de': 'Zu Plus wechseln', 'ru': 'Перейти на Plus', 'es': 'Actualizar a Plus', 'ar': 'الترقية إلى Plus'},
       'watch_ad': {'tr': 'Reklam İzle & Dene', 'en': 'Watch Ad & Try', 'de': 'Anzeige ansehen & testen', 'ru': 'Смотреть рекламу и попробовать', 'es': 'Ver anuncio y probar', 'ar': 'شاهد الإعلان وجرب'},
-      'theme_unlocked': {'tr': 'teması 2 saatliğine açıldı!', 'en': 'theme unlocked for 2 hours!', 'de': 'Thema für 2 Stunden freigeschaltet!', 'ru': 'тема разблокирована на 2 часа!', 'es': '¡tema desbloqueado por 2 horas!', 'ar': 'تم فتح السمة لمدة ساعتين!'},
+      'theme_unlocked': {'tr': 'teması 1 günlüğüne açıldı!', 'en': 'theme unlocked for 1 day!', 'de': 'Thema für 1 Tag freigeschaltet!', 'ru': 'тема разблокирована на 1 день!', 'es': '¡tema desbloqueado por 1 día!', 'ar': 'تم فتح السمة لمدة يوم واحد!'},
+      
+      'bg_image': {'tr': 'Genel Arka Plan Resmi', 'en': 'Global Background Image', 'de': 'Allgemeines Hintergrundbild', 'ru': 'Общее фоновое изображение', 'es': 'Imagen de fondo global', 'ar': 'صورة الخلفية العامة'},
+      'bg_color_title': {'tr': 'Genel Arka Plan Rengi', 'en': 'Global Background Color', 'de': 'Allgemeine Hintergrundfarbe', 'ru': 'Общий цвет фона', 'es': 'Color de fondo global', 'ar': 'لون الخلفية العام'},
+      'bg_select': {'tr': 'Galeri\'den Seç', 'en': 'Choose from Gallery', 'de': 'Aus der Galerie wählen', 'ru': 'Выбрать из галереи', 'es': 'Elegir de la galería', 'ar': 'اختر من المعرض'},
+      'bg_remove': {'tr': 'Kaldır', 'en': 'Remove', 'de': 'Entfernen', 'ru': 'Удалить', 'es': 'Eliminar', 'ar': 'إزالة'},
 
-      // Arayüz
       'lh_mode': {'tr': 'Sol El Modu', 'en': 'Left Hand Mode', 'de': 'Linkshänder-Modus', 'ru': 'Режим левой руки', 'es': 'Modo para zurdos', 'ar': 'وضع اليد اليسرى'},
       'lh_desc': {'tr': 'Arayüzü sol ele göre optimize eder', 'en': 'Optimizes UI for left-handed use', 'de': 'Optimiert die Benutzeroberfläche für Linkshänder', 'ru': 'Оптимизирует интерфейс для левшей', 'es': 'Optimiza la interfaz para uso con la mano izquierda', 'ar': 'يحسن واجهة المستخدم للاستخدام باليد اليسرى'},
       'circ_msg': {'tr': 'Dairesel Mesaj Balonları', 'en': 'Circular Message Bubbles', 'de': 'Runde Nachrichtenblasen', 'ru': 'Круглые облачки сообщений', 'es': 'Burbujas de mensajes circulares', 'ar': 'فقاعات رسائل دائرية'},
       'circ_desc': {'tr': 'Klasik hap tasarımı yerine çembersel', 'en': 'Circular shapes instead of pill design', 'de': 'Runde Formen anstelle von Pillendesign', 'ru': 'Круглые формы вместо дизайна в виде таблеток', 'es': 'Formas circulares en lugar de diseño de píldora', 'ar': 'أشكال دائرية بدلاً من تصميم الكبسولة'},
       'anim_live': {'tr': 'Yayın Animasyonu', 'en': 'Broadcast Animation', 'de': 'Broadcast-Animation', 'ru': 'Анимация трансляции', 'es': 'Animación de transmisión', 'ar': 'رسوم متحركة للبث'},
 
-      // Ses & Donanım
       'speaker': {'tr': 'Hoparlörü Kullan', 'en': 'Use Speaker', 'de': 'Lautsprecher verwenden', 'ru': 'Использовать динамик', 'es': 'Usar altavoz', 'ar': 'استخدم مكبر الصوت'},
       'speaker_desc': {'tr': 'Sesleri ahize yerine dışarı verir', 'en': 'Play sounds through the loudspeaker', 'de': 'Spielt Töne über den Lautsprecher ab', 'ru': 'Воспроизведение звука через динамик', 'es': 'Reproducir sonidos a través del altavoz', 'ar': 'تشغيل الأصوات عبر مكبر الصوت'},
       'haptic': {'tr': 'Titreşim Geri Bildirim', 'en': 'Haptic Feedback', 'de': 'Haptisches Feedback', 'ru': 'Тактильная обратная связь', 'es': 'Retroalimentación háptica', 'ar': 'ردود الفعل اللمسية'},
@@ -224,7 +245,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
       'ratchet': {'tr': 'Yörünge Çark Hissi (Çıkrık)', 'en': 'Orbit Ratchet Effect', 'de': 'Orbit Ratscheneffekt', 'ru': 'Эффект храповика', 'es': 'Efecto de trinquete de órbita', 'ar': 'تأثير السقاطة المدارية'},
       'ratchet_desc': {'tr': 'Yörüngeyi çevirirken mekanik dişli titreşimi verir', 'en': 'Mechanical gear feedback when scrolling orbit', 'de': 'Mechanisches Zahnrad-Feedback beim Scrollen der Umlaufbahn', 'ru': 'Механическая обратная связь при прокрутке орбиты', 'es': 'Retroalimentación de engranaje mecánico al desplazar la órbita', 'ar': 'ردود فعل التروس الميكانيكية عند تمرير المدار'},
 
-      // Gizlilik
       'del_unsav': {'tr': 'Kaydedilmeyen Sesleri Sil', 'en': 'Delete Unsaved Audio', 'de': 'Nicht gespeichertes Audio löschen', 'ru': 'Удалить несохраненное аудио', 'es': 'Eliminar audio no guardado', 'ar': 'حذف الصوت غير المحفوظ'},
       'del_10s': {'tr': '10 Saniye Sonra', 'en': 'After 10 Seconds', 'de': 'Nach 10 Sekunden', 'ru': 'Через 10 секунд', 'es': 'Después de 10 segundos', 'ar': 'بعد 10 ثواني'},
       'del_30s': {'tr': '30 Saniye Sonra', 'en': 'After 30 Seconds', 'de': 'Nach 30 Sekunden', 'ru': 'Через 30 секунд', 'es': 'Después de 30 segundos', 'ar': 'بعد 30 ثانية'},
@@ -235,7 +255,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
       'who_cont': {'tr': 'Sadece Kişilerim', 'en': 'My Contacts Only', 'de': 'Nur meine Kontakte', 'ru': 'Только мои контакты', 'es': 'Solo mis contactos', 'ar': 'جهات الاتصال الخاصة بي فقط'},
       'who_none': {'tr': 'Hiç Kimse (Kapalı)', 'en': 'Nobody (Closed)', 'de': 'Niemand (Geschlossen)', 'ru': 'Никто (Закрыто)', 'es': 'Nadie (Cerrado)', 'ar': 'لا أحد (مغلق)'},
 
-      // İzinler & Yasal
       'perm_warn': {'tr': 'Eğer kişileriniz Orbit\'te görünmüyorsa veya arama yapamıyorsanız, telefonunuzun kendi ayarlarından gerekli izinleri vermeniz gerekmektedir.', 'en': 'If your contacts are not visible or you cannot make calls, you need to grant permissions from your phone\'s settings.', 'de': 'Wenn Ihre Kontakte nicht sichtbar sind oder Sie keine Anrufe tätigen können, müssen Sie Berechtigungen in den Einstellungen Ihres Telefons erteilen.', 'ru': 'Если ваши контакты не видны или вы не можете совершать звонки, вам необходимо предоставить разрешения в настройках вашего телефона.', 'es': 'Si sus contactos no están visibles o no puede realizar llamadas, debe otorgar permisos en la configuración de su teléfono.', 'ar': 'إذا كانت جهات الاتصال الخاصة بك غير مرئية أو لا يمكنك إجراء مكالمات ، فأنت بحاجة إلى منح أذونات من إعدادات هاتفك.'},
       'btn_perm': {'tr': 'Sistem İzin Ayarları', 'en': 'System Permission Settings', 'de': 'Systemberechtigungseinstellungen', 'ru': 'Системные настройки разрешений', 'es': 'Configuración de permisos del sistema', 'ar': 'إعدادات إذن النظام'},
       'legal_docs': {'tr': 'Yasal Dokümanlar', 'en': 'Legal Documents', 'de': 'Rechtliche Dokumente', 'ru': 'Юридические документы', 'es': 'Documentos legales', 'ar': 'الوثائق القانونية'},
@@ -244,7 +263,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
       'legal_app': {'tr': 'Yasal Onay', 'en': 'Legal Approval', 'de': 'Rechtliche Genehmigung', 'ru': 'Юридическое одобрение', 'es': 'Aprobación legal', 'ar': 'الموافقة القانونية'},
       'legal_status': {'tr': 'Bu cihazda yasal şartlar onaylanmıştır.', 'en': 'Legal terms are approved on this device.', 'de': 'Die rechtlichen Bedingungen sind auf diesem Gerät genehmigt.', 'ru': 'Юридические условия одобрены на этом устройстве.', 'es': 'Los términos legales están aprobados en este dispositivo.', 'ar': 'تمت الموافقة على الشروط القانونية على هذا الجهاز.'},
 
-      // Bildirimler
       'notif_all': {'tr': 'Tüm Bildirimler', 'en': 'All Notifications', 'de': 'Alle Benachrichtigungen', 'ru': 'Все уведомления', 'es': 'Todas las notificaciones', 'ar': 'كل الإشعارات'},
       'notif_all_d': {'tr': 'Orbit\'ten gelen tüm bildirimleri açar veya kapatır', 'en': 'Enable or disable all notifications from Orbit', 'de': 'Aktivieren oder deaktivieren Sie alle Benachrichtigungen von Orbit', 'ru': 'Включить или отключить все уведомления от Orbit', 'es': 'Habilite o deshabilite todas las notificaciones de Orbit', 'ar': 'تمكين أو تعطيل كافة الإشعارات من المدار'},
       'notif_msg': {'tr': 'Sesli Mesaj Bildirimleri', 'en': 'Voice Message Notifications', 'de': 'Sprachnachrichtenbenachrichtigungen', 'ru': 'Уведомления о голосовых сообщениях', 'es': 'Notificaciones de mensajes de voz', 'ar': 'إشعارات الرسائل الصوتية'},
@@ -260,7 +278,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
       'ring_e2': {'tr': 'Acil Durum 2', 'en': 'Emergency 2', 'de': 'Notfall 2', 'ru': 'Экстренная ситуация 2', 'es': 'Emergencia 2', 'ar': 'طوارئ 2'},
       'ring_al': {'tr': 'Alarm Sesi', 'en': 'Alarm Sound', 'de': 'Alarmton', 'ru': 'Звук будильника', 'es': 'Sonido de alarma', 'ar': 'صوت إنذار'},
 
-      // Depolama
       'del_older': {'tr': 'Şu süreden eskileri sil:', 'en': 'Delete older than:', 'de': 'Älter löschen als:', 'ru': 'Удалить старше:', 'es': 'Eliminar más antiguos que:', 'ar': 'حذف أقدم من:'},
       'days_30': {'tr': '30 Gün', 'en': '30 Days', 'de': '30 Tage', 'ru': '30 дней', 'es': '30 Días', 'ar': '30 يوم'},
       'days_60': {'tr': '60 Gün', 'en': '60 Days', 'de': '60 Tage', 'ru': '60 дней', 'es': '60 Días', 'ar': '60 يوم'},
@@ -268,7 +285,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
       'btn_clear': {'tr': 'Temizle', 'en': 'Clear', 'de': 'Klar', 'ru': 'Очистить', 'es': 'Limpiar', 'ar': 'مسح'},
       'stor_desc': {'tr': 'Cihazda tutulan kayıtlı ses dosyalarının boyutunu azaltmak için seçtiğiniz günden daha eski dosyaları topluca silebilirsiniz.', 'en': 'You can mass delete files older than the selected days to reduce the storage size of saved audio files on the device.', 'de': 'Sie können massenhaft löschen Dateien, die älter sind als die ausgewählten Tage, um die Speichergröße der gespeicherten Audiodateien auf dem Gerät zu reduzieren.', 'ru': 'Вы можете массово удалить файлы старше выбранных дней, чтобы уменьшить размер хранилища сохраненных аудиофайлов на устройстве.', 'es': 'Puede eliminar en masa los archivos más antiguos que los días seleccionados para reducir el tamaño de almacenamiento de los archivos de audio guardados en el dispositivo.', 'ar': 'يمكنك حذف الملفات الأقدم من الأيام المحددة بشكل جماعي لتقليل حجم تخزين الملفات الصوتية المحفوظة على الجهاز.'},
 
-      // Hesap Yönetimi
       'logout': {'tr': 'Çıkış Yap', 'en': 'Log Out', 'de': 'Abmelden', 'ru': 'Выйти', 'es': 'Cerrar sesión', 'ar': 'تسجيل الخروج'},
       'logout_q': {'tr': 'Hesabınızdan çıkış yapmak istediğinize emin misiniz?', 'en': 'Are you sure you want to log out of your account?', 'de': 'Sind Sie sicher, dass Sie sich von Ihrem Konto abmelden möchten?', 'ru': 'Вы уверены, что хотите выйти из своей учетной записи?', 'es': '¿Estás seguro de que quieres cerrar sesión en tu cuenta?', 'ar': 'هل أنت متأكد أنك تريد تسجيل الخروج من حسابك؟'},
       'cancel': {'tr': 'İptal', 'en': 'Cancel', 'de': 'Abbrechen', 'ru': 'Отмена', 'es': 'Cancelar', 'ar': 'إلغاء'},
@@ -285,6 +301,7 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
   void dispose() {
     _previewPlayer.dispose(); 
     _nameController.dispose();
+    _sheetScrollController.dispose();
     super.dispose();
   }
 
@@ -303,14 +320,24 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
     setState(() {
       _expandedSection = _expandedSection == sectionName ? null : sectionName;
     });
+    
+    if (_expandedSection == _t('acc')) {
+      Future.delayed(const Duration(milliseconds: 250), () {
+        if (_hesapYonetimiKey.currentContext != null) {
+          Scrollable.ensureVisible(
+            _hesapYonetimiKey.currentContext!,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          );
+        }
+      });
+    }
   }
 
-  // 🟢 YENİ EKLENEN: Temayı açma dialogu
   void _showThemeUnlockDialog(Map<String, dynamic> theme) async {
     bool isPremium = await SubscriptionService.isPremium();
     
     if (isPremium) {
-      // Premium ise doğrudan temayı uygula
       widget.onCustomAvatarColorChanged(theme['colors'][0]);
       if(mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${theme['name']} teması uygulandı!"), backgroundColor: Colors.green));
@@ -334,8 +361,8 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
             TextButton(
               onPressed: () {
                 Navigator.pop(ctx);
-                Navigator.pop(context); // Ayarlar menüsünü de kapat
-                SubscriptionService.showPaywall(context); // 🛡️ PAYWALL AÇILIR
+                Navigator.pop(context); 
+                SubscriptionService.showPaywall(context); 
               },
               child: Text(_t('go_plus'), style: const TextStyle(color: Colors.amber)),
             ),
@@ -353,22 +380,18 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
     );
   }
 
-  // 🟢 YENİ EKLENEN: Reklam başarıyla izlendikten sonra çalışan fonksiyon
   void _handleRewardForTheme(String themeName) async {
-    // TODO: Gerçek AdMob showRewardedAd buraya eklenecek
-    // Şimdilik başarılı varsayıp SharedPreferences'a kaydediyoruz:
     final prefs = await SharedPreferences.getInstance();
-    final expiry = DateTime.now().add(const Duration(hours: 2)).toIso8601String();
+    final expiry = DateTime.now().add(const Duration(days: 1)).toIso8601String();
     await prefs.setString('unlocked_theme', themeName);
     await prefs.setString('unlocked_theme_expiry', expiry);
     
     if (mounted) {
-      Navigator.pop(context); // Ayarları kapat
+      Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("$themeName ${_t('theme_unlocked')}"), backgroundColor: Colors.green)
       );
       
-      // Hemen değişimi yansıtmak için temanın ilk rengini avatar rengi gibi set edelim
       final theme = _plusThemes.firstWhere((t) => t['name'] == themeName);
       widget.onCustomAvatarColorChanged(theme['colors'][0]);
     }
@@ -392,9 +415,10 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
     );
   }
 
-  Widget _buildSectionHeader(String title, IconData icon, Color color) {
+  Widget _buildSectionHeader(String title, IconData icon, Color color, {Key? key}) {
     bool isExpanded = _expandedSection == title;
     return GestureDetector(
+      key: key,
       onTap: () => _toggleSection(title),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -443,7 +467,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
     );
   }
 
-  // 🛡️ YENİ EKLENEN: ADAPTY PREMIUM BANNER
   Widget _buildPremiumBanner() {
     return FutureBuilder<bool>(
       future: SubscriptionService.isPremium(),
@@ -453,8 +476,8 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
         return GestureDetector(
           onTap: () {
             if (!isPlus) {
-              Navigator.pop(context); // Ayarları kapat
-              SubscriptionService.showPaywall(context); // Vitrini aç
+              Navigator.pop(context); 
+              SubscriptionService.showPaywall(context); 
             }
           },
           child: Container(
@@ -622,7 +645,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
         if (_currentAvatarPath == null) ...[
           const SizedBox(height: 25),
           
-          // --- ÜCRETSİZ RENKLER ---
           Align(
             alignment: Alignment.centerLeft,
             child: Text(_t('free_colors'), style: const TextStyle(color: Colors.white54, fontSize: 12)),
@@ -659,7 +681,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
 
           const SizedBox(height: 25),
 
-          // --- 🟢 PREMIUM (PLUS) TEMALAR KISMI ---
           Row(
             children: [
               const Icon(Icons.stars, color: Colors.amber, size: 16),
@@ -677,7 +698,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
                 final theme = _plusThemes[index];
                 return GestureDetector(
                   onTap: () {
-                    // 🟢 Reklamlı / Satın almalı diyalog tetikleniyor
                     _showThemeUnlockDialog(theme);
                   },
                   child: Container(
@@ -694,7 +714,7 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
                       boxShadow: [BoxShadow(color: theme['colors'][0].withValues(alpha: 0.5), blurRadius: 8)],
                     ),
                     child: const Center(
-                      child: Icon(Icons.lock_outline, size: 16, color: Colors.white70), // Kilit İkonu
+                      child: Icon(Icons.lock_outline, size: 16, color: Colors.white70),
                     ),
                   ),
                 );
@@ -761,6 +781,70 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
             widget.onCircularMessageStyleChanged(val);
           },
         ),
+        
+        const Divider(color: Colors.white12),
+        ListTile(
+          title: Text(_t('bg_image'), style: const TextStyle(color: Colors.white)),
+          subtitle: Text(widget.customBackgroundImagePath == null ? _t('bg_select') : _t('bg_remove'), style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          trailing: widget.customBackgroundImagePath == null
+              ? const Icon(Icons.image, color: Colors.purpleAccent)
+              : const Icon(Icons.delete, color: Colors.redAccent),
+          onTap: () async {
+            if (widget.customBackgroundImagePath == null) {
+              await widget.onPickBackground();
+            } else {
+              widget.onRemoveBackground();
+            }
+            setState(() {});
+          },
+        ),
+        
+        const Divider(color: Colors.white12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Align(
+            alignment: _isLeftHanded ? Alignment.centerRight : Alignment.centerLeft, 
+            child: Text(_t('bg_color_title'), style: const TextStyle(color: Colors.cyanAccent, fontSize: 14, fontWeight: FontWeight.bold))
+          ),
+        ),
+        SizedBox(
+          height: 60,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: _globalBgColorsList.length,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemBuilder: (context, index) {
+              final bgItem = _globalBgColorsList[index];
+              Color? c = bgItem['bgValue'];
+              
+              // 🟢 REVİZYON: State içindeki değişkene bakarak tik işaretini anında gösteriyoruz
+              bool isSelected = _currentGlobalBgColor == c; 
+              
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _currentGlobalBgColor = c; // Tik hemen değişsin diye local state güncellenir
+                  });
+                  widget.onGlobalBgColorChanged(c); // Dışarıdaki ana ekrana rengi gönderir
+                },
+                child: Container(
+                  margin: const EdgeInsets.only(right: 12),
+                  width: 50,
+                  decoration: BoxDecoration(
+                    color: bgItem['color'],
+                    shape: BoxShape.circle,
+                    border: Border.all(color: isSelected ? Colors.white : Colors.transparent, width: 3.0),
+                  ),
+                  child: isSelected 
+                      ? const Icon(Icons.check, size: 24, color: Colors.white) 
+                      : (c == Colors.black ? const Icon(Icons.layers_clear, size: 24, color: Colors.white54) : null),
+                ),
+              );
+            },
+          ),
+        ),
+        const Divider(color: Colors.white12),
+        
         const SizedBox(height: 10),
         DropdownButtonFormField<String>(
           initialValue: _selectedLiveAnimation,
@@ -898,7 +982,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Sistem İzinleri
         Text(_t('perm_warn'), style: const TextStyle(color: Colors.white54, fontSize: 12)),
         const SizedBox(height: 15),
         SizedBox(
@@ -916,7 +999,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
         const Divider(color: Colors.white24),
         const SizedBox(height: 15),
 
-        // Yasal Dokümanlar
         Text(_t('legal_docs'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
         const SizedBox(height: 10),
         ListTile(
@@ -1033,6 +1115,38 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
     );
   }
 
+  void _showDeleteDataConfirmation(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey.shade900,
+        title: Text(_t('del_older'), style: const TextStyle(color: Colors.white)),
+        content: const Text(
+          "Belirtilen süreden eski tüm veriler silinecek. Bu işlem geri alınamaz. Emin misiniz?",
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(_t('cancel'), style: const TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () {
+              Navigator.pop(ctx);
+              widget.onClearOldMessages(_deleteFilterDays);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("Veriler başarıyla silindi.", style: TextStyle(color: Colors.white)), backgroundColor: Colors.green)
+              );
+              Navigator.pop(context); 
+            },
+            child: Text(_t('btn_clear'), style: const TextStyle(color: Colors.white)),
+          ),
+        ]
+      )
+    );
+  }
+
   Widget _buildStorageContent() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1064,10 +1178,7 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
             ),
             const SizedBox(width: 20),
             ElevatedButton.icon(
-              onPressed: () {
-                widget.onClearOldMessages(_deleteFilterDays);
-                Navigator.pop(context); 
-              },
+              onPressed: () => _showDeleteDataConfirmation(context), 
               icon: const Icon(Icons.delete_sweep, size: 16),
               label: Text(_t('btn_clear')),
               style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent.withValues(alpha: 0.2), foregroundColor: Colors.redAccent),
@@ -1186,8 +1297,8 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
                   await FirebaseAuth.instance.currentUser?.delete();
                 } catch (e) {
                   if (context.mounted) {
-                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Güvenlik nedeniyle lütfen çıkış yapıp tekrar giriş yaptıktan sonra hesabınızı silin."), backgroundColor: Colors.orange));
-                     await FirebaseAuth.instance.signOut();
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Güvenlik nedeniyle lütfen çıkış yapıp tekrar giriş yaptıktan sonra hesabınızı silin."), backgroundColor: Colors.orange));
+                      await FirebaseAuth.instance.signOut();
                   }
                 }
               }, 
@@ -1223,7 +1334,6 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
                 Text(_t('title'), style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w300, letterSpacing: 1.2)),
                 const SizedBox(height: 10),
                 
-                // 🛡️ ADAPTY BANNER BURAYA EKLENDİ
                 _buildPremiumBanner(),
 
                 Expanded(
@@ -1255,7 +1365,7 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
                       _buildSectionHeader(_t('stor'), Icons.storage_outlined, Colors.redAccent),
                       _buildSectionContent(title: _t('stor'), child: _buildStorageContent()),
                       
-                      _buildSectionHeader(_t('acc'), Icons.manage_accounts, Colors.grey.shade400),
+                      _buildSectionHeader(_t('acc'), Icons.manage_accounts, Colors.grey.shade400, key: _hesapYonetimiKey),
                       _buildSectionContent(title: _t('acc'), child: _buildAccountManagementContent()),
                       
                       const SizedBox(height: 40), 

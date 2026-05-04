@@ -3,7 +3,7 @@ import 'package:adapty_flutter/adapty_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'orbit_main_screen.dart'; // Başarılı olursa ana ekrana yönlendirmek için
+import 'orbit_main_screen.dart'; 
 
 class PaywallScreen extends StatefulWidget {
   const PaywallScreen({super.key});
@@ -24,16 +24,12 @@ class _PaywallScreenState extends State<PaywallScreen> {
     _loadPaywallData();
   }
 
-  // 1. Adapty'den Ürünleri Çekme Operasyonu
+  // 1. Adapty'den Ürünleri Çekme Operasyonu (GÜVENLİ TAKTİK)
   Future<void> _loadPaywallData() async {
     try {
-      // Adapty panelindeki "Placement ID" ile vitrini buluyoruz
-      final paywall = await Adapty().getPaywall(placementId: 'default_placement');
-      
-      // Analitik için vitrinin gösterildiğini Adapty'e bildiriyoruz
+      // 🟢 Adapty panelindeki Placement ID ne olursa olsun bulmaya çalışır
+      final paywall = await Adapty().getPaywall(placementId: 'default_placement'); // ADAPTY PANELİNDEKİ İSİMLE AYNI OLMALI
       await Adapty().logShowPaywall(paywall: paywall);
-      
-      // Vitrindeki ürünleri (orbit_plus_1m) çekiyoruz
       final products = await Adapty().getPaywallProducts(paywall: paywall);
 
       setState(() {
@@ -53,10 +49,9 @@ class _PaywallScreenState extends State<PaywallScreen> {
   Future<void> _makePurchase(AdaptyPaywallProduct product) async {
     setState(() => _isPurchasing = true);
     try {
-      final profile = await Adapty().makePurchase(product: product);
+      final result = await Adapty().makePurchase(product: product);
       
-      // Adapty panelindeki "Access level ID" ile kontrol ediyoruz
-      if (profile.accessLevels['premium']?.isActive == true) {
+      if (result is AdaptyPurchaseResultSuccess && result.profile.accessLevels['premium']?.isActive == true) {
         debugPrint("✅ Satın alma başarılı! Premium Aktif.");
         
         final prefs = await SharedPreferences.getInstance();
@@ -75,14 +70,14 @@ class _PaywallScreenState extends State<PaywallScreen> {
       debugPrint("🛑 Satın Alma İptal veya Hata: $e");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Satın alma işlemi tamamlanamadı.'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('Satın alma işlemi iptal edildi veya tamamlanamadı.'), backgroundColor: Colors.red),
       );
     } finally {
-      setState(() => _isPurchasing = false);
+      if (mounted) setState(() => _isPurchasing = false);
     }
   }
 
-  // 3. Satın Almaları Geri Yükleme (Apple Zorunluluğu)
+  // 3. Satın Almaları Geri Yükleme
   Future<void> _restorePurchases() async {
     setState(() => _isPurchasing = true);
     try {
@@ -106,12 +101,15 @@ class _PaywallScreenState extends State<PaywallScreen> {
       }
     } catch (e) {
       debugPrint("🛑 Restore Hatası: $e");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bağlantı hatası.')),
+      );
     } finally {
-      setState(() => _isPurchasing = false);
+      if (mounted) setState(() => _isPurchasing = false);
     }
   }
 
-  // Yasal Link Açıcı
   Future<void> _launchURL(String urlString) async {
     final Uri url = Uri.parse(urlString);
     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
@@ -134,24 +132,36 @@ class _PaywallScreenState extends State<PaywallScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
           : _products == null || _products!.isEmpty
-              ? const Center(child: Text("Paketler şu an yüklenemiyor.", style: TextStyle(color: Colors.white)))
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.error_outline, color: Colors.redAccent, size: 50),
+                      const SizedBox(height: 16),
+                      const Text("Paketler şu an yüklenemiyor.\nLütfen internet bağlantınızı kontrol edin.", textAlign: TextAlign.center, style: TextStyle(color: Colors.white70)),
+                      const SizedBox(height: 20),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent),
+                        onPressed: _loadPaywallData,
+                        child: const Text("Tekrar Dene", style: TextStyle(color: Colors.black)),
+                      )
+                    ],
+                  ),
+                )
               : Stack(
                   children: [
                     Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // Logo / İkon
                         const Icon(Icons.satellite_alt, size: 80, color: Colors.cyanAccent),
                         const SizedBox(height: 20),
                         
-                        // Başlık
                         const Text(
                           "Orbit Plus",
                           style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white),
                         ),
                         const SizedBox(height: 10),
                         
-                        // Özellikler
                         const Padding(
                           padding: EdgeInsets.symmetric(horizontal: 40),
                           child: Text(
@@ -162,7 +172,6 @@ class _PaywallScreenState extends State<PaywallScreen> {
                         ),
                         const SizedBox(height: 40),
 
-                        // Satın Alma Butonu (Mağazadan gelen fiyatı gösterir)
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 30),
                           child: ElevatedButton(
@@ -177,14 +186,13 @@ class _PaywallScreenState extends State<PaywallScreen> {
                             child: _isPurchasing 
                               ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
                               : Text(
-                                  "Abone Ol - ${_products!.first.localizedPrice}", 
+                                  "Abone Ol - ${_products!.first.price.localizedString}", 
                                   style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)
                                 ),
                           ),
                         ),
                         const SizedBox(height: 20),
 
-                        // Restore Butonu
                         TextButton(
                           onPressed: _isPurchasing ? null : _restorePurchases,
                           child: const Text("Satın Almaları Geri Yükle", style: TextStyle(color: Colors.cyanAccent)),
@@ -192,17 +200,16 @@ class _PaywallScreenState extends State<PaywallScreen> {
                         
                         const SizedBox(height: 30),
 
-                        // Yasal Linkler
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             TextButton(
-                              onPressed: () => _launchURL('https://senin-gizlilik-linkin.com'), // BURAYI DEĞİŞTİR
+                              onPressed: () => _launchURL('https://orbit-talk.com/privacy.html'), // 🟢 YENİ SİTEMİZİN LİNKİ EKLENDİ
                               child: const Text('Gizlilik Politikası', style: TextStyle(fontSize: 12, color: Colors.grey)),
                             ),
                             const Text('|', style: TextStyle(color: Colors.grey)),
                             TextButton(
-                              onPressed: () => _launchURL('https://senin-sartlar-linkin.com'), // BURAYI DEĞİŞTİR
+                              onPressed: () => _launchURL('https://orbit-talk.com/terms.html'), // 🟢 YENİ SİTEMİZİN LİNKİ EKLENDİ
                               child: const Text('Kullanım Şartları', style: TextStyle(fontSize: 12, color: Colors.grey)),
                             ),
                           ],

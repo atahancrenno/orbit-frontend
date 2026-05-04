@@ -26,13 +26,16 @@ class OrbitContactNode extends StatefulWidget {
   final String userName;
   final Color myCustomColor;
   final Color? statusColor;
-  
+  final bool isBlocked; 
   final bool isMenuExpanded; 
 
   final VoidCallback onOpenContacts;
   final VoidCallback onSearchedPersonSelected;
   final VoidCallback onPersonSelected;
   final VoidCallback onRequestLiveConnection;
+  
+  // 🟢 YENİ: Çift Tıklama (Dürtme) için geri çağırma fonksiyonu eklendi
+  final VoidCallback? onDoubleTap; 
   
   final Function(int index, double radialOffset) onNodeDragUpdate;
   final Function(int index) onNodeInteractionEnded;
@@ -63,11 +66,13 @@ class OrbitContactNode extends StatefulWidget {
     required this.userName,
     required this.myCustomColor,
     required this.statusColor,
+    required this.isBlocked, 
     required this.isMenuExpanded,
     required this.onOpenContacts,
     required this.onSearchedPersonSelected,
     required this.onPersonSelected,
     required this.onRequestLiveConnection,
+    this.onDoubleTap, // 🟢 Eklendi
     required this.onNodeDragUpdate,
     required this.onNodeInteractionEnded,
     required this.onNodeInteractionStarted,
@@ -216,12 +221,11 @@ class _OrbitContactNodeState extends State<OrbitContactNode> with SingleTickerPr
         alignment: Alignment.center,
         children: [
           CustomPaint(
-            // Noktayı çizecek olan motor burası! 
             painter: CurvedTextPainter(
-              text: _formatName(widget.contact['name']).toUpperCase(),
+              text: widget.isBlocked ? "ENGELLENDI" : _formatName(widget.contact['name']).toUpperCase(),
               radius: 46,
-              color: isEmptySlot ? Colors.white30 : ((widget.showSearchField && isMatch && widget.searchQuery.isNotEmpty) ? Colors.orangeAccent : (widget.isLive ? Colors.greenAccent : (isActive ? Colors.cyanAccent : Colors.white70))),
-              statusColor: widget.statusColor, // Rengi buraya gönderiyoruz
+              color: isEmptySlot ? Colors.white30 : (widget.isBlocked ? Colors.redAccent : ((widget.showSearchField && isMatch && widget.searchQuery.isNotEmpty) ? Colors.orangeAccent : (widget.isLive ? Colors.greenAccent : (isActive ? Colors.cyanAccent : Colors.white70)))),
+              statusColor: widget.isBlocked ? Colors.redAccent : widget.statusColor, 
               baseAngle: animGlobalAngle,
             ),
           ),
@@ -235,11 +239,17 @@ class _OrbitContactNodeState extends State<OrbitContactNode> with SingleTickerPr
                 if (widget.currentlyPlayingQueueItemSender == widget.contact['name'])
                   ...List.generate(3, (i) => widget.incomingWaveBuilder(i)),
                   
-                OrbitContactAvatar(
-                  contact: widget.contact, isActive: isActive, isMatch: isMatch, isLive: widget.isLive, showSearchField: widget.showSearchField, unreadCount: widget.unreadCount, userName: widget.userName, myCustomColor: widget.myCustomColor,statusColor: widget.statusColor,
+                Opacity(
+                  opacity: widget.isBlocked ? 0.3 : 1.0,
+                  child: ColorFiltered(
+                    colorFilter: widget.isBlocked ? const ColorFilter.mode(Colors.grey, BlendMode.saturation) : const ColorFilter.mode(Colors.transparent, BlendMode.multiply),
+                    child: OrbitContactAvatar(
+                      contact: widget.contact, isActive: isActive, isMatch: isMatch, isLive: widget.isLive, showSearchField: widget.showSearchField, unreadCount: widget.unreadCount, userName: widget.userName, myCustomColor: widget.myCustomColor,statusColor: widget.statusColor,
+                    ),
+                  ),
                 ),
                 
-                if (isBeingPulled)
+                if (isBeingPulled && !widget.isBlocked)
                   Container(
                     width: 60, height: 60,
                     decoration: BoxDecoration(
@@ -249,10 +259,21 @@ class _OrbitContactNodeState extends State<OrbitContactNode> with SingleTickerPr
                     ),
                     child: const Icon(Icons.wifi_tethering, color: Colors.greenAccent, size: 28),
                   ),
+
+                if (widget.isBlocked)
+                  Container(
+                    width: 60, height: 60,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle, 
+                      color: Colors.black.withValues(alpha: 0.7),
+                      border: Border.all(color: Colors.redAccent, width: 2)
+                    ),
+                    child: const Icon(Icons.block, color: Colors.redAccent, size: 30),
+                  ),
               ],
             ),
             
-          if (showLaser && _radiusOffset == 0.0) 
+          if (showLaser && _radiusOffset == 0.0 && !widget.isBlocked) 
             Positioned.fill(child: Transform.rotate(angle: animGlobalAngle + math.pi, child: Padding(padding: const EdgeInsets.only(left: 35.0), child: Align(alignment: Alignment.centerLeft, child: ConnectionArrows(color: laserColor))))),
         ],
       ),
@@ -290,6 +311,8 @@ class _OrbitContactNodeState extends State<OrbitContactNode> with SingleTickerPr
                       try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ }
                     }
                   },
+                  // 🟢 YENİ: Çift Tıklama Olayı Bağlandı
+                  onDoubleTap: widget.onDoubleTap,
                   
                   onPanStart: (details) {
                     _isValidDrag = false;

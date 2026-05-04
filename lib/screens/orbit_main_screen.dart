@@ -1,6 +1,7 @@
 // ignore_for_file: prefer_final_fields
 
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart'; 
 import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import 'dart:async';
@@ -34,14 +35,11 @@ import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart' hide AVAudioSessionCategory;
 import '../services/notification_service.dart';
 
-// 🟢 GOOGLE ADMOB IMPORTU
 import 'package:google_mobile_ads/google_mobile_ads.dart';
-
-// 🛡️ ADAPTY MERKEZİ KONTROL KULESİ
 import '../services/subscription_service.dart';
 
 enum UserStatus { available, busy, away, offline }
-enum SubOrbitType { none, effects, emojis, nudge }
+enum SubOrbitType { none, effects, emojis, nudge, background }
 
 class OrbitMainScreen extends StatefulWidget {
   const OrbitMainScreen({super.key});
@@ -96,8 +94,21 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   String selectedLiveAnimation = "Radar";
   List<String> animationOptions = ["Mini Ekolayzır", "Radar", "Nabız", "Nefes"];
   String? _customBackgroundImagePath;
+  
+  Color? _globalBgColor;
+  Map<String, Color> _contactBackgrounds = {};
 
   double _scrollOffset = 0.0;
+  double _subOrbitScrollOffset = 0.0;
+  
+  late AnimationController _scrollPhysicsController;
+  late AnimationController _subScrollPhysicsController;
+
+  double _subRatchetAccumulator = 0.0;
+  int _lastSubRatchetTime = 0;
+  double _lastSubDragAngle = 0.0;
+  bool _isValidSubOrbitDrag = false;
+
   int activeIndex = -1;
   bool _showConnectionArrows = false;
   Timer? _arrowsTimer;
@@ -148,6 +159,8 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   double _dragOffset = 0.0;
   double _dragVerticalOffset = 0.0;
   bool _isCancelled = false;
+  
+  String? _lockedDragAxis; 
 
   Timer? _micDebounceTimer;
   DateTime? _recordingStartTime;
@@ -165,27 +178,23 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   Timer? _notificationDebounceTimer;
 
   SubOrbitType _activeSubOrbit = SubOrbitType.none;
-  double _subOrbitScrollOffset = 0.0;
 
   final ScrollController _activeMenuScrollController = ScrollController();
   final ScrollController _mainMenuScrollController = ScrollController();
 
   String _currentLang = 'tr';
 
-  // 🟢 ÖDÜLLÜ REKLAM DEĞİŞKENLERİ
   RewardedAd? _rewardedAd;
   bool _isAdLoaded = false;
 
-  // 🟢 ANTI-SPAM ZIRHI
   bool _isActionInProgress = false;
 
   void _runSafeAction(VoidCallback action) {
-    if (_isActionInProgress) return; // İşlem yapılıyorsa reddet
+    if (_isActionInProgress) return; 
     
     setState(() => _isActionInProgress = true);
     action();
 
-    // 800ms sonra kilidi aç
     Future.delayed(const Duration(milliseconds: 800), () {
       if (mounted) setState(() => _isActionInProgress = false);
     });
@@ -193,60 +202,67 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
 
   String _t(String key) {
     const Map<String, Map<String, String>> dict = {
-      'invite': {'tr': 'Davet Et', 'en': 'Invite', 'de': 'Einladen', 'ru': 'Пригласить', 'es': 'Invitar', 'ar': 'دعوة'},
-      'search': {'tr': 'Arama', 'en': 'Search', 'de': 'Suche', 'ru': 'Поиск', 'es': 'Buscar', 'ar': 'بحث'},
-      'saved': {'tr': 'Kayıtlılar', 'en': 'Saved', 'de': 'Gespeichert', 'ru': 'Сохраненные', 'es': 'Guardados', 'ar': 'المحفوظات'},
-      'add_contact': {'tr': 'Kişi Ekle', 'en': 'Add Contact', 'de': 'Kontakt +', 'ru': 'Добавить', 'es': 'Añadir', 'ar': 'إضافة جهة اتصال'},
-      'settings': {'tr': 'Ayarlar', 'en': 'Settings', 'de': 'Einstellungen', 'ru': 'Настройки', 'es': 'Ajustes', 'ar': 'الإعدادات'},
-      'nudge_grp': {'tr': 'Grubu Dürt', 'en': 'Nudge Group', 'de': 'Gruppe anstupsen', 'ru': 'Торкнуть группу', 'es': 'Dar toque', 'ar': 'نكز المجموعة'},
-      'send_react': {'tr': 'Tepki Gönder', 'en': 'Send Reaction', 'de': 'Reaktion senden', 'ru': 'Отпр. реакцию', 'es': 'Enviar reacción', 'ar': 'إرسال تفاعل'},
-      'voice_fx': {'tr': 'Ses Efekti', 'en': 'Voice Effect', 'de': 'Spracheffekt', 'ru': 'Голос. эффект', 'es': 'Efecto de voz', 'ar': 'تأثير الصوت'},
-      'roger': {'tr': 'Anlaşıldı', 'en': 'Got it', 'de': 'Verstanden', 'ru': 'Понятно', 'es': 'Entendido', 'ar': 'مفهوم'},
-      'filter': {'tr': 'Okunmamışları Filtrele', 'en': 'Filter Unread', 'de': 'Ungelesene filtern', 'ru': 'Фильтр', 'es': 'Filtrar no leídos', 'ar': 'تصفية غير المقروءة'},
-      'unmute': {'tr': 'Sesi Aç', 'en': 'Unmute', 'de': 'Ton an', 'ru': 'Вкл. звук', 'es': 'Activar sonido', 'ar': 'إلغاء كتم الصوت'},
-      'mute': {'tr': 'Sessize Al', 'en': 'Mute', 'de': 'Stummschalten', 'ru': 'Выкл. звук', 'es': 'Silenciar', 'ar': 'كتم الصوت'},
-      'unblock': {'tr': 'Engeli Kaldır', 'en': 'Unblock', 'de': 'Entblocken', 'ru': 'Разблокировать', 'es': 'Desbloquear', 'ar': 'إلغاء الحظر'},
-      'block': {'tr': 'Engelle', 'en': 'Block', 'de': 'Blockieren', 'ru': 'Заблокировать', 'es': 'Bloquear', 'ar': 'حظر'},
-      'rm_orbit': {'tr': 'Yörüngeden Çıkar', 'en': 'Remove from Orbit', 'de': 'Aus Orbit entfernen', 'ru': 'Удалить с орбиты', 'es': 'Quitar de órbita', 'ar': 'إزالة من المدار'},
-      'disconnect': {'tr': 'Bağlantıyı Kes', 'en': 'Disconnect', 'de': 'Trennen', 'ru': 'Отключиться', 'es': 'Desconectar', 'ar': 'قطع الاتصال'},
-      'cancel': {'tr': 'İptal Et', 'en': 'Cancel', 'de': 'Abbrechen', 'ru': 'Отмена', 'es': 'Cancelar', 'ar': 'إلغاء'},
-      'offline': {'tr': 'Çevrimdışı', 'en': 'Offline', 'de': 'Offline', 'ru': 'Не в сети', 'es': 'Desconectado', 'ar': 'غير متصل'},
-      'online': {'tr': 'Çevrimiçi', 'en': 'Online', 'de': 'Online', 'ru': 'В сети', 'es': 'En línea', 'ar': 'متصل'},
-      'is_spk': {'tr': 'konuşuyor...', 'en': 'is speaking...', 'de': 'spricht...', 'ru': 'говорит...', 'es': 'está hablando...', 'ar': 'يتحدث...'},
-      'replying': {'tr': 'Yanıtlanıyor: ', 'en': 'Replying: ', 'de': 'Antworten: ', 'ru': 'Отвечает: ', 'es': 'Respondiendo: ', 'ar': 'يتم الرد: '},
-      'choose_fx': {'tr': 'SES EFEKTİ SEÇ', 'en': 'CHOOSE VOICE EFFECT', 'de': 'SPRACHEFFEKT WÄHLEN', 'ru': 'ВЫБРАТЬ ГОЛОСОВОЙ ЭФФЕКТ', 'es': 'ELEGIR EFECTO DE VOZ', 'ar': 'اختر تأثير الصوت'},
-      'send_re_title': {'tr': 'TEPKİ GÖNDER', 'en': 'SEND REACTION', 'de': 'REAKTION SENDEN', 'ru': 'ОТПРАВИТЬ РЕАКЦИЮ', 'es': 'ENVIAR REACCIÓN', 'ar': 'إرسال تفاعل'},
-      'nudge_grp_title': {'tr': 'GRUBUNU DÜRT', 'en': 'NUDGE GROUP', 'de': 'GRUPPE ANSTUPSEN', 'ru': 'ТОРКНУТЬ ГРУППУ', 'es': 'DAR TOQUE AL GRUPO', 'ar': 'نكز المجموعة'},
-      'nudge_all': {'tr': 'TÜMÜNÜ\nDÜRT', 'en': 'NUDGE\nALL', 'de': 'ALLE\nANSTUPSEN', 'ru': 'ТОРКНУТЬ\nВСЕХ', 'es': 'TOCAR A\nTODOS', 'ar': 'نكز\nالجميع'},
-      'unknown': {'tr': 'Bilinmeyen', 'en': 'Unknown', 'de': 'Unbekannt', 'ru': 'Неизвестный', 'es': 'Desconocido', 'ar': 'غير معروف'},
-      'is_busy': {'tr': 'şu an meşgul.', 'en': 'is busy right now.', 'de': 'ist gerade beschäftigt.', 'ru': 'сейчас занят.', 'es': 'está ocupado ahora.', 'ar': 'مشغول الآن.'},
-      'calling': {'tr': 'aranıyor...', 'en': 'calling...', 'de': 'ruft an...', 'ru': 'звонок...', 'es': 'llamando...', 'ar': 'يتصل...'},
-      'call_not_ans': {'tr': 'Davet isteği yanıtlanmadı.', 'en': 'Call request not answered.', 'de': 'Anrufanfrage nicht beantwortet.', 'ru': 'На звонок не ответили.', 'es': 'Llamada no respondida.', 'ar': 'لم يتم الرد على طلب المكالمة.'},
-      'call_canc': {'tr': 'Arama iptal edildi.', 'en': 'Call cancelled.', 'de': 'Anruf abgebrochen.', 'ru': 'Звонок отменен.', 'es': 'Llamada cancelada.', 'ar': 'تم إلغاء المكالمة.'},
-      'roger_sent': {'tr': 'Anlaşıldı gönderildi ✅', 'en': 'Message acknowledged ✅', 'de': 'Verstanden gesendet ✅', 'ru': 'Принято отправлено ✅', 'es': 'Recibido enviado ✅', 'ar': 'تم إرسال علم ✅'},
-      'all_nudged': {'tr': 'Tüm grup dürtüldü!', 'en': 'Whole group nudged!', 'de': 'Ganze Gruppe angestupst!', 'ru': 'Вся группа торкнута!', 'es': '¡Todo el grupo tocado!', 'ar': 'تم نكز المجموعة بأكملها!'},
-      'sent_react': {'tr': 'sana bir tepki gönderdi.', 'en': 'sent you a reaction.', 'de': 'hat dir eine Reaktion gesendet.', 'ru': 'отправил(а) вам реакцию.', 'es': 'te envió una reacción.', 'ar': 'أرسل لك تفاعلاً.'},
-      'attention': {'tr': 'DİKKAT! telsize çağırıyor!', 'en': 'ATTENTION! calling you to voice chat!', 'de': 'ACHTUNG! ruft dich an!', 'ru': 'ВНИМАНИЕ! вызывает вас!', 'es': '¡ATENCIÓN! te llama al chat de voz!', 'ar': 'انتباه! يدعوك للمحادثة الصوتية!'},
-      'new_msg': {'tr': 'yeni mesaj gönderdi.', 'en': 'sent a new message.', 'de': 'hat eine neue Nachricht gesendet.', 'ru': 'отправил(а) новое сообщение.', 'es': 'envió un nuevo mensaje.', 'ar': 'أرسل رسالة جديدة.'},
-      'not_answering': {'tr': 'cevap vermiyor.', 'en': 'is not answering.', 'de': 'antwortet nicht.', 'ru': 'не отвечает.', 'es': 'no contesta.', 'ar': 'لا يرد.'},
-      'reject_busy': {'tr': 'çağrıyı reddetti veya meşgul.', 'en': 'rejected the call or is busy.', 'de': 'hat den Anruf abgelehnt oder ist beschäftigt.', 'ru': 'отклонил звонок или занят.', 'es': 'rechazó la llamada o está ocupado.', 'ar': 'رفض المكالمة أو مشغول.'},
-      'disconnected': {'tr': 'bağlantıyı kopardı.', 'en': 'disconnected.', 'de': 'hat die Verbindung getrennt.', 'ru': 'отключился.', 'es': 'se desconectó.', 'ar': 'قطع الاتصال.'},
-      'accepted_call': {'tr': 'çağrısını kabul etti!', 'en': 'accepted the call!', 'de': 'hat den Anruf angenommen!', 'ru': 'принял вызов!', 'es': '¡aceptó la llamada!', 'ar': 'قبل مكالمة!'},
-      'missed_call': {'tr': 'Cevapsız çağrı:', 'en': 'Missed call:', 'de': 'Verpasster Anruf:', 'ru': 'Пропущенный звонок:', 'es': 'Llamada perdida:', 'ar': 'مكالمة فائتة:'},
-      'del_warn': {'tr': 'adlı kişiyi yörüngeden çıkarmak istediğine emin misin?', 'en': 'are you sure you want to remove this user from your orbit?', 'de': 'sind Sie sicher, dass Sie diesen Benutzer entfernen möchten?', 'ru': 'вы уверены, что хотите удалить этого пользователя с орбиты?', 'es': '¿seguro que quieres quitar a este usuario de tu órbita?', 'ar': 'هل أنت متأكد أنك تريد إزالة هذا المستخدم من مدارك؟'},
-      'del_btn': {'tr': 'SİL', 'en': 'DELETE', 'de': 'LÖSCHEN', 'ru': 'УДАЛИТЬ', 'es': 'ELIMINAR', 'ar': 'حذف'},
-      'removed': {'tr': 'orbitten çıkartıldı.', 'en': 'removed from orbit.', 'de': 'aus dem Orbit entfernt.', 'ru': 'удален с орбиты.', 'es': 'eliminado de la órbita.', 'ar': 'تمت إزالته من المدار.'},
-      'Normal': {'tr': 'Normal', 'en': 'Normal', 'de': 'Normal', 'ru': 'Нормальный', 'es': 'Normal', 'ar': 'عادي'},
-      'Askeri': {'tr': 'Megafon', 'en': 'Megaphone', 'de': 'Megafon', 'ru': 'Военный', 'es': 'Megáfono', 'ar': 'مكبر الصوت'},
-      'Megafon': {'tr': 'Stadyum', 'en': 'Stadium', 'de': 'Stadion', 'ru': 'Рупор', 'es': 'Estadio', 'ar': 'ملعب'},
-      'Anonim': {'tr': 'Anonim', 'en': 'Anonymous', 'de': 'Anonym', 'ru': 'Аноним', 'es': 'Anónimo', 'ar': 'مجهول'},
-      'Helyum': {'tr': 'Helyum', 'en': 'Helium', 'de': 'Helium', 'ru': 'Гелий', 'es': 'Helio', 'ar': 'هيليوم'},
-      'Robot': {'tr': 'Robot', 'en': 'Robot', 'de': 'Roboter', 'ru': 'Робот', 'es': 'Robot', 'ar': 'روبوت'},
-      'Uzaylı': {'tr': 'Uzaylı', 'en': 'Alien', 'de': 'Alien', 'ru': 'Инопланетянин', 'es': 'Extraterrestre', 'ar': 'كائن فضائي'},
-      'Mağara': {'tr': 'Mağara', 'en': 'Cave', 'de': 'Höhle', 'ru': 'Пещера', 'es': 'Cueva', 'ar': 'كهف'},
-      'Canavar': {'tr': 'Canavar', 'en': 'Monster', 'de': 'Monster', 'ru': 'Монстр', 'es': 'Monstruo', 'ar': 'وحش'},
-      'Radyo': {'tr': 'Radyo', 'en': 'Radio', 'de': 'Radio', 'ru': 'Радио', 'es': 'Radio', 'ar': 'راديو'},
-      'search_orbit': {'tr': 'Orbitte Ara...', 'en': 'Search Orbit...', 'de': 'Suchen...', 'ru': 'Поиск...', 'es': 'Buscar...', 'ar': 'البحث في المدار...'},
+      'invite': {'tr': 'Davet Et', 'en': 'Invite'},
+      'search': {'tr': 'Arama', 'en': 'Search'},
+      'saved': {'tr': 'Kayıtlılar', 'en': 'Saved'},
+      'add_contact': {'tr': 'Kişi Ekle', 'en': 'Add Contact'},
+      'settings': {'tr': 'Ayarlar', 'en': 'Settings'},
+      'nudge_grp': {'tr': 'Grubu Dürt', 'en': 'Nudge Group'},
+      'send_react': {'tr': 'Tepki Gönder', 'en': 'Send Reaction'},
+      'voice_fx': {'tr': 'Ses Efekti', 'en': 'Voice Effect'},
+      
+      'bg_color': {'tr': 'Arka Plan', 'en': 'Background'},
+      'choose_bg': {'tr': 'ARKA PLAN SEÇ', 'en': 'CHOOSE BACKGROUND'},
+
+      'roger': {'tr': 'Anlaşıldı', 'en': 'Got it'},
+      'filter': {'tr': 'Okunmamışları Filtrele', 'en': 'Filter Unread'},
+      'unmute': {'tr': 'Sesi Aç', 'en': 'Unmute'},
+      'mute': {'tr': 'Sessize Al', 'en': 'Mute'},
+      'unblock': {'tr': 'Engeli Kaldır', 'en': 'Unblock'},
+      'block': {'tr': 'Engelle', 'en': 'Block'},
+      'rm_orbit': {'tr': 'Yörüngeden Çıkar', 'en': 'Remove from Orbit'},
+      'disconnect': {'tr': 'Bağlantıyı Kes', 'en': 'Disconnect'},
+      'cancel': {'tr': 'İptal Et', 'en': 'Cancel'},
+      'offline': {'tr': 'Çevrimdışı', 'en': 'Offline'},
+      'online': {'tr': 'Çevrimiçi', 'en': 'Online'},
+      'is_spk': {'tr': 'konuşuyor...', 'en': 'is speaking...'},
+      'replying': {'tr': 'Yanıtlanıyor: ', 'en': 'Replying: '},
+      
+      'choose_fx': {'tr': 'SES EFEKTİ SEÇ', 'en': 'CHOOSE VOICE EFFECT'},
+      'send_re_title': {'tr': 'EMOJİ SEÇ', 'en': 'CHOOSE EMOJI'},
+      
+      'nudge_grp_title': {'tr': 'GRUBUNU DÜRT', 'en': 'NUDGE GROUP'},
+      'nudge_all': {'tr': 'TÜMÜNÜ\nDÜRT', 'en': 'NUDGE\nALL'},
+      'unknown': {'tr': 'Bilinmeyen', 'en': 'Unknown'},
+      'is_busy': {'tr': 'şu an meşgul.', 'en': 'is busy right now.'},
+      'calling': {'tr': 'aranıyor...', 'en': 'calling...'},
+      'call_not_ans': {'tr': 'Davet isteği yanıtlanmadı.', 'en': 'Call request not answered.'},
+      'call_canc': {'tr': 'Arama iptal edildi.', 'en': 'Call cancelled.'},
+      'roger_sent': {'tr': 'Anlaşıldı gönderildi ✅', 'en': 'Message acknowledged ✅'},
+      'all_nudged': {'tr': 'Tüm grup dürtüldü!', 'en': 'Whole group nudged!'},
+      'sent_react': {'tr': 'sana bir tepki gönderdi.', 'en': 'sent you a reaction.'},
+      'attention': {'tr': 'DİKKAT! telsize çağırıyor!', 'en': 'ATTENTION! calling you to voice chat!'},
+      'nudge_alert': {'tr': 'seni dürttü! 👉', 'en': 'nudged you! 👉'},
+      'new_msg': {'tr': 'yeni mesaj gönderdi.', 'en': 'sent a new message.'},
+      'not_answering': {'tr': 'cevap vermiyor.', 'en': 'is not answering.'},
+      'reject_busy': {'tr': 'çağrıyı reddetti veya meşgul.', 'en': 'rejected the call or is busy.'},
+      'disconnected': {'tr': 'bağlantıyı kopardı.', 'en': 'disconnected.'},
+      'accepted_call': {'tr': 'çağrısını kabul etti!', 'en': 'accepted the call!'},
+      'missed_call': {'tr': 'Cevapsız çağrı:', 'en': 'Missed call:'},
+      'del_warn': {'tr': 'adlı kişiyi yörüngeden çıkarmak istediğine emin misin?', 'en': 'are you sure you want to remove this user from your orbit?'},
+      'del_btn': {'tr': 'SİL', 'en': 'DELETE'},
+      'removed': {'tr': 'orbitten çıkartıldı.', 'en': 'removed from orbit.'},
+      'Normal': {'tr': 'Normal', 'en': 'Normal'},
+      'Askeri': {'tr': 'Megafon', 'en': 'Megaphone'},
+      'Megafon': {'tr': 'Stadyum', 'en': 'Stadium'},
+      'Anonim': {'tr': 'Anonim', 'en': 'Anonymous'},
+      'Helyum': {'tr': 'Helyum', 'en': 'Helium'},
+      'Robot': {'tr': 'Robot', 'en': 'Robot'},
+      'Uzaylı': {'tr': 'Uzaylı', 'en': 'Alien'},
+      'Kilitli Özellik': {'tr': 'Kilitli Özellik', 'en': 'Locked Feature'},
+      'Canavar': {'tr': 'Canavar', 'en': 'Monster'},
+      'Radyo': {'tr': 'Radyo', 'en': 'Radio'},
+      'search_orbit': {'tr': 'Orbitte Ara...', 'en': 'Search Orbit...'},
     };
     return dict[key]?[_currentLang] ?? dict[key]?['en'] ?? key;
   }
@@ -260,9 +276,22 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     {"name": "Helyum", "icon": Icons.child_care, "color": Colors.pinkAccent},
     {"name": "Robot", "icon": Icons.smart_toy, "color": Colors.blueAccent},
     {"name": "Uzaylı", "icon": Icons.flutter_dash, "color": Colors.tealAccent},
-    {"name": "Mağara", "icon": Icons.waves, "color": Colors.indigoAccent},
+    {"name": "Kilitli Özellik", "icon": Icons.waves, "color": Colors.indigoAccent},
     {"name": "Canavar", "icon": Icons.coronavirus, "color": Colors.redAccent},
     {"name": "Radyo", "icon": Icons.speaker, "color": Colors.orangeAccent},
+  ];
+
+  // 🟢 YENİ PASTEL RENKLER
+  final List<Map<String, dynamic>> _bgColorsList = [
+    {"name": "Cihazdan Fotoğraf Seç", "color": Colors.white, "bgValue": null, "icon": Icons.add_photo_alternate, "isGallery": true}, 
+    {"name": "Varsayılan (Kaldır)", "color": Colors.transparent, "bgValue": null, "icon": Icons.layers_clear},
+    {"name": "Klasik Siyah", "color": Colors.white30, "bgValue": Colors.black, "icon": Icons.wallpaper},
+    {"name": "Saf Gri", "color": Colors.grey, "bgValue": Colors.grey.shade800, "icon": Icons.wallpaper},
+    {"name": "Pastel Mavi", "color": const Color(0xFF90B4CE), "bgValue": const Color(0xFF90B4CE), "icon": Icons.water_drop},
+    {"name": "Pastel Yeşil", "color": const Color(0xFFA3C9A8), "bgValue": const Color(0xFFA3C9A8), "icon": Icons.forest},
+    {"name": "Pastel Kırmızı", "color": const Color(0xFFE5989B), "bgValue": const Color(0xFFE5989B), "icon": Icons.local_fire_department},
+    {"name": "Pastel Mor", "color": const Color(0xFFB5A6C4), "bgValue": const Color(0xFFB5A6C4), "icon": Icons.nightlight_round},
+    {"name": "Pastel Turuncu", "color": const Color(0xFFF3B562), "bgValue": const Color(0xFFF3B562), "icon": Icons.brightness_high},
   ];
 
   final List<FlyingEmoji> _flyingEmojis = [];
@@ -277,13 +306,11 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     '😢', '😭', '💔', '🥶', '😴', '🚑'
   ];
 
-  // 🛡️ 1. DÜRTME LİMİTİ (Adapty Korumalı)
   Future<void> _handleNudgeWithLimit(Map<String, dynamic> item) async {
     bool isPremium = await SubscriptionService.isPremium();
     final prefs = await SharedPreferences.getInstance();
     
     if (isPremium) {
-      // Sınırsız Dürtme
       String phone = item['phone'];
       SocketService().sendNudge(phone, _currentUserPhone!, _userName);
       if (!mounted) return;
@@ -307,10 +334,56 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     setState(() => _activeSubOrbit = SubOrbitType.none);
   }
 
-  // 🛡️ 2. YÖRÜNGEDEN ÇIKARMA LİMİTİ (Adapty Korumalı)
+  Future<void> _handleDoubleTapNudge(int index) async {
+    if (activeIndex == -1 || allContacts[index]['isEmpty'] == true) return;
+    
+    Map<String, dynamic> item = allContacts[index];
+    bool isPremium = await SubscriptionService.isPremium();
+    final prefs = await SharedPreferences.getInstance();
+    
+    void sendToTarget(String phone) {
+      SocketService().sendNudge(phone, _currentUserPhone!, _userName);
+    }
+
+    Future<void> executeNudge() async {
+      if (item['isGroup'] == true) {
+        List<dynamic> members = item['members'] ?? [];
+        for (var m in members) {
+          sendToTarget(m.toString());
+        }
+      } else {
+        sendToTarget(item['phone']);
+      }
+      if (hapticEnabled) { 
+        try { 
+          HapticFeedback.heavyImpact(); 
+          await Future.delayed(const Duration(milliseconds: 100));
+          HapticFeedback.heavyImpact(); 
+        } catch (_) {} 
+      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${item['name']} dürtüldü! ⚡"), backgroundColor: Colors.orange));
+    }
+
+    if (isPremium) {
+      await executeNudge();
+    } else {
+      int nudgesLeft = prefs.getInt('nudge_limit') ?? 5;
+      if (nudgesLeft > 0) {
+        await executeNudge();
+        await prefs.setInt('nudge_limit', nudgesLeft - 1);
+      } else {
+        _showLimitDialog("Dürtme Hakkınız Bitti", "Günlük dürtme limitine ulaştınız. Orbit Plus ile sınırsız dürtme yapabilir veya reklam izleyerek +5 hak kazanabilirsiniz.", true, () async {
+          final p = await SharedPreferences.getInstance();
+          await p.setInt('nudge_limit', 5);
+          if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("5 yeni dürtme hakkı eklendi!")));
+        });
+      }
+    }
+  }
+
   Future<bool> _checkRemovalLimit() async {
     bool isPremium = await SubscriptionService.isPremium();
-    if (isPremium) return true; // Sınırsız
+    if (isPremium) return true;
 
     final prefs = await SharedPreferences.getInstance();
     int removalCount = prefs.getInt('orbit_removal_count') ?? 0;
@@ -318,7 +391,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     if (removalCount >= 5) {
       _showLimitDialog("Değişim Limiti Doldu", "Ücretsiz sürümde yörüngeden en fazla 5 kişi çıkarabilirsiniz. Sınırları kaldırmak için Orbit Plus'a geçin veya reklam izleyerek +3 hak kazanın.", true, () async {
         final p = await SharedPreferences.getInstance();
-        await p.setInt('orbit_removal_count', 2); // 3 hak vermiş olduk (5 - 3 = 2)
+        await p.setInt('orbit_removal_count', 2);
         if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("+3 yeni silme/değişim hakkı eklendi!")));
       });
       return false; 
@@ -327,7 +400,6 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     return true;
   }
 
-  // 🛡️ 3. YÖRÜNGEYE EKLEME LİMİTİ (Adapty Korumalı)
   Future<bool> _checkAdditionLimit() async {
     bool isPremium = await SubscriptionService.isPremium();
     int currentContactCount = allContacts.where((c) => c['isEmpty'] != true).length;
@@ -339,7 +411,6 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     return true;
   }
 
-  // 🟢 4. ORTAK LİMİT DİYALOG EKRANI (Adapty Paywall'a Bağlandı)
   void _showLimitDialog(String title, String content, bool showAdButton, VoidCallback? onAdWatched) {
     showDialog(
       context: context,
@@ -362,7 +433,6 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
             style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
             onPressed: () {
               Navigator.pop(ctx);
-              // 🛡️ ADAPTY PAYWALL'U ÇAĞIR
               SubscriptionService.showPaywall(context);
             },
             child: const Text("Plus'a Geç", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
@@ -413,9 +483,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     if (!mounted) {
       return;
     }
-
     final double randomOffset = (math.Random().nextDouble() * 120) - 60;
-
     final newEmoji = FlyingEmoji(
       id: DateTime.now().microsecondsSinceEpoch.toString() + math.Random().nextInt(1000).toString(),
       emoji: emoji,
@@ -464,6 +532,29 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     });
   }
 
+  void _handleBackgroundSelection(Color? color) async {
+    if (activeIndex != -1) {
+      String identifier = allContacts[activeIndex]['isGroup'] == true ? allContacts[activeIndex]['name'] : allContacts[activeIndex]['phone'];
+      
+      setState(() {
+        if (color == null) {
+          _contactBackgrounds.remove(identifier);
+        } else {
+          _contactBackgrounds[identifier] = color;
+        }
+        _activeSubOrbit = SubOrbitType.none;
+      });
+      
+      final prefs = await SharedPreferences.getInstance();
+      if (color == null) {
+        await prefs.remove('bg_$identifier');
+      } else {
+        await prefs.setInt('bg_$identifier', color.value);
+      }
+      if (hapticEnabled) { try { HapticFeedback.lightImpact(); } catch (_) {} }
+    }
+  }
+
   List<Map<String, dynamic>> _getSubOrbitItems() {
     if (_activeSubOrbit == SubOrbitType.effects) {
       return _voiceEffects.map((fx) => {
@@ -472,6 +563,10 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
         "icon": fx["icon"],
         "color": fx["color"]
       }).toList();
+    }
+
+    if (_activeSubOrbit == SubOrbitType.background) {
+      return _bgColorsList;
     }
 
     if (_activeSubOrbit == SubOrbitType.emojis) {
@@ -511,20 +606,33 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     });
   }
 
-  void _onSubItemTapped(Map<String, dynamic> item) {
+  void _onSubItemTapped(Map<String, dynamic> item) async {
     if (hapticEnabled) {
       try { HapticFeedback.selectionClick(); } catch (_) {}
     }
 
+    if (item['isGallery'] == true) {
+        String? path = await _pickImage(ImageSource.gallery, isBackground: true);
+        if (path != null) {
+            setState(() {
+                _activeSubOrbit = SubOrbitType.none;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Arka plan kaydedildi!", style: TextStyle(color: Colors.white)), backgroundColor: Colors.green));
+        }
+        return;
+    }
+
     if (_activeSubOrbit == SubOrbitType.effects) {
       _handleEffectSelection(item['name']);
+    } else if (_activeSubOrbit == SubOrbitType.background) {
+      _handleBackgroundSelection(item['bgValue']); 
     } else if (_activeSubOrbit == SubOrbitType.emojis) {
       _handleEmojiSelection(item['emoji']);
     } else if (_activeSubOrbit == SubOrbitType.nudge) {
       _handleNudgeWithLimit(item); 
     }
 
-    if (_activeSubOrbit != SubOrbitType.nudge) {
+    if (_activeSubOrbit != SubOrbitType.nudge && _activeSubOrbit != SubOrbitType.background) {
       setState(() => _activeSubOrbit = SubOrbitType.none);
     }
   }
@@ -687,6 +795,41 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     _hapticRejectPulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 600))..repeat(reverse: true);
     _hapticTerminatePulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1500))..repeat(reverse: true);
 
+    _scrollPhysicsController = AnimationController.unbounded(vsync: this);
+    _scrollPhysicsController.addListener(() {
+      setState(() {
+        _scrollOffset = _scrollPhysicsController.value;
+      });
+    });
+
+    _subScrollPhysicsController = AnimationController.unbounded(vsync: this);
+    _subScrollPhysicsController.addListener(() {
+      setState(() {
+        double delta = (_subScrollPhysicsController.value - _lastPhysicsSubValue).abs();
+        _lastPhysicsSubValue = _subScrollPhysicsController.value;
+        _subOrbitScrollOffset = _subScrollPhysicsController.value;
+
+        if (_ratchetEnabled && delta > 0.0) {
+          _subRatchetAccumulator += delta;
+          double threshold = Platform.isAndroid ? 0.08 : 0.06;
+          int debounceTime = Platform.isAndroid ? 60 : 40;
+          if (_subRatchetAccumulator >= threshold) {
+            _subRatchetAccumulator -= threshold;
+            int now = DateTime.now().millisecondsSinceEpoch;
+            if (now - _lastSubRatchetTime > debounceTime) {
+              _lastSubRatchetTime = now;
+              if (hapticEnabled) {
+                try {
+                  if (Platform.isAndroid) HapticFeedback.vibrate();
+                  else HapticFeedback.selectionClick();
+                } catch (_) {}
+              }
+            }
+          }
+        }
+      });
+    });
+
     FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
       if (message != null) {
         _handleFCMMessage(message);
@@ -735,6 +878,8 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
 
     _setupSocketListeners();
   }
+
+  double _lastPhysicsSubValue = 0.0;
 
   Future<void> _loadLanguage() async {
     final prefs = await SharedPreferences.getInstance();
@@ -796,6 +941,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       }
     };
 
+    // 🟢 HATA RADARI 1: KONUŞUYOR DURUMUNU SIFIRLAMA
     SocketService().onUserSpeaking = (callerId, isSpeaking) {
       if (mounted) {
         setState(() {
@@ -803,9 +949,8 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
             _whoIsSpeaking = callerId;
             _resetLiveTimeoutForContact(callerId);
           } else {
-            if (_whoIsSpeaking == callerId) {
-              _whoIsSpeaking = null;
-            }
+            // Sinyal "false" geldiğinde direk null yap ki asılı kalmasın.
+            _whoIsSpeaking = null;
           }
         });
       }
@@ -820,6 +965,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
           _pendingCallerName = null;
           _isHandlingPendingCall = false;
           _isIncomingCallActive = false;
+          _whoIsSpeaking = null; // 🟢 BAĞLANTI BİTİŞ KİLİDİ
         });
         _closeCallDialogSafely();
         try { NotificationService().cancelCallNotification(); } catch (_) {}
@@ -866,6 +1012,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
               _pendingCallerName = null;
               _isHandlingPendingCall = false;
               _isIncomingCallActive = false;
+              _whoIsSpeaking = null; // 🟢 BAĞLANTI BİTİŞ KİLİDİ
             });
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${_t('missed_call')} $displayName"), backgroundColor: Colors.orange.shade800));
           }
@@ -926,6 +1073,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
             _isIncomingCallActive = false;
             _liveDurationTimer?.cancel();
             _liveDuration = 0;
+            _whoIsSpeaking = null; // 🟢 BAĞLANTI BİTİŞ KİLİDİ
           }
         });
         String displayName = _localContactsMap[targetId] ?? targetId;
@@ -945,6 +1093,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
           if (_activeLiveContacts.isEmpty) {
             isWaitingForLiveApproval = false;
             _isIncomingCallActive = false;
+            _whoIsSpeaking = null; // 🟢 BAĞLANTI BİTİŞ KİLİDİ
           }
         });
         try { NotificationService().cancelCallNotification(); } catch (_) {}
@@ -991,6 +1140,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
             await file.writeAsBytes(fileResponse.bodyBytes);
           }
         } catch (e) {
+          debugPrint("🚨 İNDİRME HATASI onAudioPlayed: $e");
           return;
         }
       }
@@ -1021,22 +1171,43 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     };
 
     SocketService().onNudgeReceived = (senderId, senderName) async {
-      if (!mounted) {
-        return;
+      if (!mounted) return;
+      if (_blockedContacts.contains(senderId)) return;
+      
+      // 🟢 ARKA PLAN RADARI: Eğer uygulama açık değilse Push Bildirim Gönder!
+      if (_appState != AppLifecycleState.resumed) {
+        if (_notificationsEnabled) {
+          try { 
+            NotificationService().showMessageNotification("$senderName seni dürttü! 👉"); 
+          } catch (_) {}
+        }
       }
-      if (_blockedContacts.contains(senderId)) {
-        return;
-      }
+
       for (int i = 0; i < 5; i++) {
         if (hapticEnabled) { try { HapticFeedback.vibrate(); } catch (_) {} }
         await Future.delayed(const Duration(milliseconds: 400));
       }
       if (mounted) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        String txt = _t('attention');
-        String p1 = '${txt.split('!')[0]}!';
-        String p2 = txt.substring(p1.length).trim();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Row(children: [const Icon(Icons.vibration, color: Colors.orangeAccent), const SizedBox(width: 10), Expanded(child: Text("$p1 $senderName $p2", style: const TextStyle(fontWeight: FontWeight.bold)))]), backgroundColor: Colors.deepOrange.shade900, behavior: SnackBarBehavior.floating));
+        String txt = _t('nudge_alert');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.touch_app, color: Colors.amber), 
+                const SizedBox(width: 10), 
+                Expanded(
+                  child: Text(
+                    "$senderName $txt", 
+                    style: const TextStyle(fontWeight: FontWeight.bold)
+                  )
+                )
+              ]
+            ), 
+            backgroundColor: Colors.deepOrange.shade900, 
+            behavior: SnackBarBehavior.floating
+          )
+        );
       }
     };
 
@@ -1122,6 +1293,54 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     }
   }
 
+  Future<void> _loadOrbitFromCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? cached = prefs.getString('cached_orbit');
+    if (cached != null && cached.isNotEmpty) {
+      try {
+        List<dynamic> decoded = jsonDecode(cached);
+        List<Map<String, dynamic>> loaded = [];
+        for (var item in decoded) {
+          String name = item['name'] ?? '';
+          if (name.toLowerCase().contains('gizli ajan') || name.toLowerCase().contains('test')) continue;
+          
+          UserStatus s = UserStatus.offline;
+          if (item['status'] == 'UserStatus.available') s = UserStatus.available;
+          else if (item['status'] == 'UserStatus.busy') s = UserStatus.busy;
+          else if (item['status'] == 'UserStatus.away') s = UserStatus.away;
+
+          loaded.add({
+            'name': name,
+            'phone': item['phone'],
+            'isGroup': item['isGroup'],
+            'uid': item['uid'],
+            'status': s,
+            'isEmpty': item['isEmpty'],
+          });
+        }
+        if (loaded.isNotEmpty && mounted) {
+          setState(() {
+            originalContacts = loaded;
+            allContacts = List.from(originalContacts);
+          });
+        }
+      } catch (e) { debugPrint("Cache error: $e"); }
+    }
+  }
+
+  Future<void> _saveOrbitToCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String jsonStr = jsonEncode(originalContacts.map((c) => {
+      'name': c['name'],
+      'phone': c['phone'],
+      'isGroup': c['isGroup'],
+      'uid': c['uid'],
+      'status': c['status'].toString(),
+      'isEmpty': c['isEmpty'],
+    }).toList());
+    await prefs.setString('cached_orbit', jsonStr);
+  }
+
   Future<void> _secureStarter() async {
     await _loadLanguage();
     if (mounted) {
@@ -1159,6 +1378,22 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     _callRingtone = prefs.getString('call_ringtone') ?? "";
     _ratchetEnabled = prefs.getBool('ratchet_enabled') ?? true;
 
+    int? globalColorVal = prefs.getInt('global_bg_color');
+    if (globalColorVal != null) {
+      _globalBgColor = Color(globalColorVal);
+    }
+
+    final keys = prefs.getKeys();
+    for (String key in keys) {
+      if (key.startsWith('bg_')) {
+        String phone = key.substring(3);
+        int? colorVal = prefs.getInt(key);
+        if (colorVal != null) {
+          _contactBackgrounds[phone] = Color(colorVal);
+        }
+      }
+    }
+
     if (_currentUserPhone != null && _currentUserPhone!.isNotEmpty && savedToken != null) {
       await _socketService.initConnection(_currentUserPhone!, savedToken);
       _isSocketStarted = true;
@@ -1185,7 +1420,9 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     } else {
       debugPrint("⚠️ Telsiz başlatılamadı: Telefon veya Token eksik!");
     }
-    _fetchUsersFromOurAPI();
+    
+    await _loadOrbitFromCache(); 
+    _fetchUsersFromOurAPI(); 
     _fetchPendingMessages();
 
     Future.delayed(const Duration(seconds: 1), () async {
@@ -1226,7 +1463,13 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
           if (_currentUserPhone != null && phone == _currentUserPhone) {
             continue;
           }
-          String contactName = _localContactsMap.containsKey(phone) ? _localContactsMap[phone]! : (u['name'] != null && u['name'] != "Bilinmeyen Kullanıcı" ? u['name'] : phone);
+          
+          String rawName = u['name']?.toString() ?? "";
+          if (rawName.toLowerCase().contains('gizli ajan') || rawName.toLowerCase().contains('test')) {
+            continue; 
+          }
+
+          String contactName = _localContactsMap.containsKey(phone) ? _localContactsMap[phone]! : (rawName != "" && rawName != "Bilinmeyen Kullanıcı" ? rawName : phone);
           String rawStatus = u['status']?.toString().toLowerCase() ?? 'offline';
           UserStatus statusEnum = UserStatus.offline;
           
@@ -1243,9 +1486,9 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
             "isGroup": false, 
             "status": statusEnum, 
             "uid": u['_id'], 
-            "phone": phone
+            "phone": phone,
+            "isEmpty": false 
           });
-          fetchedContacts.add({"name": contactName, "isGroup": false, "status": statusEnum, "uid": u['_id'], "phone": phone});
         }
         
         var seenPhones = <String>{};
@@ -1258,14 +1501,27 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
           }
         }
         fetchedContacts = uniqueContacts;
+
+        List<Map<String, dynamic>> mergedContacts = [];
+        for (var localContact in originalContacts) {
+            if (localContact['isEmpty'] == true) continue;
+            
+            var apiMatchIndex = fetchedContacts.indexWhere((apiContact) => apiContact['phone'] == localContact['phone']);
+            
+            if (apiMatchIndex != -1) {
+                localContact['status'] = fetchedContacts[apiMatchIndex]['status'];
+                fetchedContacts.removeAt(apiMatchIndex); 
+            }
+            mergedContacts.add(localContact);
+        }
         
-        for (int i = fetchedContacts.length; i < 7; i++) {
-          fetchedContacts.add({"name": "Davet Et", "isEmpty": true});
+        for (int i = mergedContacts.length; i < 7; i++) {
+          mergedContacts.add({"name": "Davet Et", "isEmpty": true});
         }
         
         if (mounted) {
           setState(() {
-            originalContacts = fetchedContacts;
+            originalContacts = mergedContacts;
             if (isSearching) {
               _handleSearch(_searchController.text);
             } else {
@@ -1273,6 +1529,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
             }
           });
           _sortOrbitContactsByRecent();
+          _saveOrbitToCache(); 
         }
       } else {
         debugPrint("🛑 Rehber çekme hatası: Sunucu reddetti. Kod: ${response.statusCode}");
@@ -1340,7 +1597,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
         }
       }
     } catch (e) {
-      // ignore
+      debugPrint("🚨 Bekleyen Mesajlar Çekilemedi: $e");
     }
   }
 
@@ -1437,6 +1694,10 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     _notificationDebounceTimer?.cancel();
     _activeMenuScrollController.dispose();
     _mainMenuScrollController.dispose();
+    
+    _scrollPhysicsController.dispose();
+    _subScrollPhysicsController.dispose();
+    
     WidgetsBinding.instance.removeObserver(this);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown, DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
     super.dispose();
@@ -1560,6 +1821,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       }
       await _historyPlayer.resume();
     } catch (e) {
+      debugPrint("🚨 Çalma Hatası (_playMessage): $e");
       await _historyPlayer.stop();
       final session = await AudioSession.instance;
       session.setActive(false).catchError((_) => false);
@@ -1577,7 +1839,15 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     _recordTimer?.cancel(); _amplitudeTimer?.cancel(); _micDebounceTimer?.cancel();
 
     if (!isChunkContinue) {
-      setState(() { isRecording = true; _isCurrentlyPlayingOrRecording = true; _recordDuration = 0; _dragOffset = 0.0; _dragVerticalOffset = 0.0; _isCancelled = false; });
+      setState(() { 
+        isRecording = true; 
+        _isCurrentlyPlayingOrRecording = true; 
+        _recordDuration = 0; 
+        _dragOffset = 0.0; 
+        _dragVerticalOffset = 0.0; 
+        _isCancelled = false; 
+        _lockedDragAxis = null; 
+      });
       if (_activeLiveContacts.isNotEmpty) {
         for (var target in _activeLiveContacts) {
           SocketService().sendSpeakingState(target, true);
@@ -1645,6 +1915,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
           });
         }
       } catch (e) {
+        debugPrint("🚨 Mikrofon Hatası: $e");
         if (mounted) {
           setState(() { isRecording = false; _isCurrentlyPlayingOrRecording = false; });
         }
@@ -1659,7 +1930,10 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     _micDebounceTimer?.cancel(); _amplitudeTimer?.cancel(); _recordTimer?.cancel();
 
     if (!isChunk) {
-      setState(() { isRecording = false; _audioLevel.value = 0.0; });
+      setState(() { 
+        isRecording = false; 
+        _audioLevel.value = 0.0; 
+      });
       if (_activeLiveContacts.isNotEmpty) {
         for (var target in _activeLiveContacts) {
           SocketService().sendSpeakingState(target, false);
@@ -1703,16 +1977,26 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
         setState(() { _allMessages.insert(0, newMsg); _sortOrbitContactsByRecent(); });
 
         try {
+          final prefs = await SharedPreferences.getInstance();
+          final token = prefs.getString('auth_token') ?? '';
+
           var uri = Uri.parse('http://188.166.101.147:3005/api/upload');
           var request = http.MultipartRequest('POST', uri);
+          
+          request.headers['Authorization'] = 'Bearer $token';
+
           request.files.add(await http.MultipartFile.fromPath('audio', audioFile.path));
           request.fields['voiceEffect'] = _selectedVoiceEffect;
 
+          debugPrint("📡 SES SUNUCUYA YÜKLENİYOR... URI: $uri");
+
           var response = await request.send();
-          if (response.statusCode == 200) {
-            var responseData = await response.stream.bytesToString();
+          var responseData = await response.stream.bytesToString();
+
+          if (response.statusCode == 200 || response.statusCode == 201) {
+            debugPrint("✅ SES BAŞARIYLA YÜKLENDİ: $responseData");
             var jsonResponse = jsonDecode(responseData);
-            String audioUrl = jsonResponse['fileUrl'];
+            String audioUrl = jsonResponse['fileUrl'] ?? jsonResponse['url'] ?? '';
 
             if (_activeLiveContacts.isNotEmpty) {
               for(var target in _activeLiveContacts) {
@@ -1722,15 +2006,31 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
             } else if (!isGroup) {
               SocketService().sendAudio(allContacts[activeIndex]['phone'], audioUrl, newMsg.id);
             }
+          } else {
+            debugPrint("🚨 SUNUCU YÜKLEMEYİ REDDETTİ! Code: ${response.statusCode} | Body: $responseData");
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Sunucu Hatası: ${response.statusCode}"), backgroundColor: Colors.red));
+            }
           }
-        } catch (e) { /* ignore */ }
+        } catch (e) { 
+          debugPrint("🚨 AĞ/BAĞLANTI ÇÖKTÜ: $e");
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Bağlantı Hatası!"), backgroundColor: Colors.orange));
+          }
+        }
       }
     }
 
     if (isChunk && isRecording) {
       _startRecording(isChunkContinue: true);
     } else {
-      setState(() { _dragOffset = 0.0; _dragVerticalOffset = 0.0; _isCancelled = false; _replyingToMessage = null; });
+      setState(() { 
+        _dragOffset = 0.0; 
+        _dragVerticalOffset = 0.0; 
+        _isCancelled = false; 
+        _replyingToMessage = null; 
+        _lockedDragAxis = null; 
+      });
     }
   }
 
@@ -1740,15 +2040,28 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     }
     bool isLive = _activeLiveContacts.isNotEmpty;
     setState(() {
-      double moveDelta = event.localDelta.dx;
-      if (_isLeftHanded) {
-        _dragOffset += moveDelta; _dragOffset = _dragOffset.clamp(0.0, 150.0);
-      } else {
-        _dragOffset += moveDelta; _dragOffset = _dragOffset.clamp(-150.0, 0.0);
+      if (_lockedDragAxis == null) {
+        if (event.localDelta.dx.abs() > 1.5 && event.localDelta.dx.abs() > event.localDelta.dy.abs()) {
+          _lockedDragAxis = 'horizontal';
+        } else if (event.localDelta.dy.abs() > 1.5 && event.localDelta.dy.abs() > event.localDelta.dx.abs()) {
+          _lockedDragAxis = 'vertical';
+        }
       }
 
-      if (isLive && event.localDelta.dy > 0) {
-        _dragVerticalOffset += event.localDelta.dy;
+      if (_lockedDragAxis == 'horizontal') {
+        double moveDelta = event.localDelta.dx;
+        if (_isLeftHanded) {
+          _dragOffset += moveDelta; _dragOffset = _dragOffset.clamp(0.0, 150.0);
+        } else {
+          _dragOffset += moveDelta; _dragOffset = _dragOffset.clamp(-150.0, 0.0);
+        }
+        _dragVerticalOffset = 0.0; 
+      } 
+      else if (_lockedDragAxis == 'vertical' && isLive) {
+        if (event.localDelta.dy > 0) {
+          _dragVerticalOffset += event.localDelta.dy;
+        }
+        _dragOffset = 0.0; 
       }
 
       if (isLive && _dragVerticalOffset > 130 && !_isCancelled) {
@@ -1792,6 +2105,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
         if (_activeLiveContacts.isEmpty) {
           _liveDurationTimer?.cancel();
           _liveDuration = 0;
+          _whoIsSpeaking = null; // 🟢 BAĞLANTI BİTİŞ KİLİDİ
         }
       });
       if (hapticEnabled) {
@@ -1987,6 +2301,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
           }
         }
       });
+      _saveOrbitToCache(); 
     }
   }
 
@@ -2014,6 +2329,18 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       onClearOldMessages: (days) { final limitDate = DateTime.now().subtract(Duration(days: days)); setState(() { _allMessages.removeWhere((m) => m.isSaved && m.createdAt.isBefore(limitDate)); }); },
       customBackgroundImagePath: _customBackgroundImagePath, onPickBackground: () => _pickImage(ImageSource.gallery, isBackground: true),
       onRemoveBackground: () { setState(() { _customBackgroundImagePath = null; isBackgroundTransparent = true; }); },
+      
+      globalBgColor: _globalBgColor,
+      onGlobalBgColorChanged: (val) async {
+        setState(() => _globalBgColor = val);
+        final prefs = await SharedPreferences.getInstance();
+        if (val == null) {
+          await prefs.remove('global_bg_color');
+        } else {
+          await prefs.setInt('global_bg_color', val.toARGB32());
+        }
+      },
+      
       onClosed: () {
         if (mounted) {
           setState(() { _isSettingsOpen = false; });
@@ -2066,7 +2393,6 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     setState(() { _isIncomingCallActive = false; _pttSlideOffset = 0.0; if (_pendingCallerId == currentCallerId) { _pendingCallerId = null; _pendingCallerName = null; } });
   }
 
-  // 🟢 EFEKT KİLİT VE REKLAM YÖNETİMİ
   Future<void> _handleEffectSelection(String effectName) async {
     if (effectName == 'Normal') {
       setState(() { _selectedVoiceEffect = effectName; });
@@ -2104,7 +2430,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
             ],
           ),
           content: const Text(
-            "Bu ajan frekansını 1 saat boyunca sınırsız kullanmak için kısa bir veri aktarımı (Reklam) izlemeniz gerekiyor.",
+            "Bu ses özelliğini 1 saat boyunca kullanmak için Reklam izlemeniz gerekiyor.",
             style: TextStyle(color: Colors.white70),
           ),
           actions: [
@@ -2115,7 +2441,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent, foregroundColor: Colors.black),
               icon: const Icon(Icons.play_arrow, size: 18),
-              label: const Text('Kilidi Aç'),
+              label: const Text('Reklam İzle'),
               onPressed: () {
                 Navigator.pop(ctx);
                 _showRewardedAdGeneric(() async {
@@ -2145,12 +2471,10 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
           mainAxisAlignment: _isLeftHanded ? MainAxisAlignment.start : MainAxisAlignment.end,
           children: [
             if (!_isLeftHanded) ...[
-              Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+              Expanded(child: Text(label, overflow: TextOverflow.ellipsis, maxLines: 1, textAlign: TextAlign.right, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold))),
               const SizedBox(width: 14),
             ],
-
             if (_isLeftHanded) const SizedBox(width: 3.5),
-
             Container(
               width: 48, height: 48,
               decoration: BoxDecoration(
@@ -2160,12 +2484,10 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
               ),
               child: Icon(icon, color: color, size: 22),
             ),
-
             if (!_isLeftHanded) const SizedBox(width: 3.5),
-
             if (_isLeftHanded) ...[
               const SizedBox(width: 14),
-              Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+              Expanded(child: Text(label, overflow: TextOverflow.ellipsis, maxLines: 1, textAlign: TextAlign.left, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold))),
             ],
           ],
         ),
@@ -2178,7 +2500,6 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       return;
     }
     
-    // 🟢 LİMİT KONTROLÜ
     bool canRemove = await _checkRemovalLimit();
     if (!canRemove) return;
 
@@ -2219,6 +2540,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                       activeIndex = -1;
                     }
                   });
+                  _saveOrbitToCache(); 
                   if (hapticEnabled) { try { HapticFeedback.heavyImpact(); } catch (_) { /* ignore */ } }
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$nameToDel ${_t('removed')}"), backgroundColor: Colors.red.shade800));
                 },
@@ -2230,6 +2552,30 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       },
     );
   }
+
+  void _runPhysicsSimulation(double velocity, AnimationController controller, double currentOffset, double maxScroll) {
+    if (velocity.abs() < 100) return; 
+    
+    double direction = _isLeftHanded ? -1.0 : 1.0;
+    double pixelsPerRadian = 300.0;
+    double initialVelocity = (velocity / pixelsPerRadian) * direction;
+
+    final simulation = FrictionSimulation(
+      0.05, 
+      currentOffset,
+      initialVelocity,
+    );
+
+    controller.animateWith(simulation).whenComplete(() {
+        double current = controller.value;
+        if (current < -0.2) {
+            controller.animateTo(-0.2, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+        } else if (current > maxScroll) {
+            controller.animateTo(maxScroll, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+        }
+    });
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -2246,17 +2592,31 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                     final double screenHeight = constraints.maxHeight;
                     double orbitRadius = 105.0;
                     double menuX = screenWidth / 2;
-                    double menuY = screenHeight - 280.0;
+                    double menuY = screenHeight - 300.0; 
                     double itemSpacingAngle = 0.25 * math.pi;
                     double maxScroll = (allContacts.length * itemSpacingAngle) - (4 * itemSpacingAngle);
                     if (maxScroll < 0) {
                       maxScroll = 0;
+                    }
+                    
+                    double maxSubScroll = 0;
+                    if (_activeSubOrbit != SubOrbitType.none) {
+                        maxSubScroll = (_getSubOrbitItems().length * itemSpacingAngle) - (4 * itemSpacingAngle);
+                        if (maxSubScroll < 0) maxSubScroll = 0;
                     }
 
                     String activeContactName = activeIndex != -1 ? allContacts[activeIndex]['name'] : "";
                     bool isGroup = activeIndex != -1 ? (allContacts[activeIndex]['isGroup'] ?? false) : false;
 
                     bool isCurrentlyLive = false;
+                    
+                    Color? activeBgColor;
+                    if (activeIndex != -1 && allContacts[activeIndex]['isEmpty'] != true) {
+                      String identifier = isGroup ? allContacts[activeIndex]['name'] : allContacts[activeIndex]['phone'];
+                      activeBgColor = _contactBackgrounds[identifier];
+                    }
+                    
+                    activeBgColor ??= _globalBgColor;
 
                     if (activeIndex != -1) {
                       if (isGroup) {
@@ -2300,6 +2660,8 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                           if (_interactionNodeIndex != -1) {
                             return;
                           }
+                          
+                          _scrollPhysicsController.stop(); 
 
                           double dx = details.localPosition.dx - menuX;
                           double dy = details.localPosition.dy - menuY;
@@ -2380,18 +2742,29 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                         onPanEnd: (details) {
                           _isValidOrbitDrag = false;
                           _ratchetAccumulator = 0.0;
+                          
+                          if (showSearchField || _activeSubOrbit != SubOrbitType.none) return;
+                          
+                          double velocity = details.velocity.pixelsPerSecond.dx + details.velocity.pixelsPerSecond.dy;
+                          _runPhysicsSimulation(velocity, _scrollPhysicsController, _scrollOffset, maxScroll);
                         },
 
                         child: Stack(
                           children: [
-                            if (_customBackgroundImagePath != null)
+                            if (activeBgColor != null)
+                              Positioned.fill(
+                                child: Container(
+                                  color: activeBgColor!.withValues(alpha: 1.0),
+                                ),
+                              )
+                            else if (_customBackgroundImagePath != null)
                               Positioned.fill(child: Image.file(File(_customBackgroundImagePath!), fit: BoxFit.cover))
                             else if (!isBackgroundTransparent)
-                              Container(color: Colors.black)
+                              Positioned.fill(child: Container(color: Colors.black))
                             else
                               Positioned.fill(child: Container(color: Colors.black)),
 
-                            if (_customBackgroundImagePath != null || isBackgroundTransparent)
+                            if (activeBgColor == null && (_customBackgroundImagePath != null || isBackgroundTransparent))
                               Positioned.fill(child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 12.0, sigmaY: 12.0), child: Container(color: Colors.black.withValues(alpha: 0.4)))),
 
                             Positioned.fill(
@@ -2409,30 +2782,28 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                               ),
                             ),
 
-                            // 🟢 ORBIT PLUS ANA EKRAN BUTONU (ADAPTY KORUMALI)
                             Positioned(
-                              top: 50,
-                              right: 20,
+                              top: 15,
+                              right: 15,
                               child: SafeArea(
                                 child: GestureDetector(
                                   onTap: () => _runSafeAction(() {
                                     if (hapticEnabled) { try { HapticFeedback.selectionClick(); } catch (_) {} }
-                                    // ADAPTY PAYWALL ÇAĞRILIYOR
                                     SubscriptionService.showPaywall(context);
                                   }),
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                     decoration: BoxDecoration(
                                       gradient: const LinearGradient(colors: [Colors.amber, Colors.orangeAccent]),
-                                      borderRadius: BorderRadius.circular(20),
-                                      boxShadow: [BoxShadow(color: Colors.amber.withValues(alpha: 0.4), blurRadius: 10, spreadRadius: 1)],
+                                      borderRadius: BorderRadius.circular(16),
+                                      boxShadow: [BoxShadow(color: Colors.amber.withValues(alpha: 0.4), blurRadius: 8, spreadRadius: 1)],
                                       border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 1),
                                     ),
                                     child: const Row(
                                       children: [
-                                        Icon(Icons.stars, color: Colors.white, size: 16),
-                                        SizedBox(width: 6),
-                                        Text("Orbit Plus", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 0.5)),
+                                        Icon(Icons.stars, color: Colors.white, size: 14),
+                                        SizedBox(width: 4),
+                                        Text("Orbit Plus", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 0.5)),
                                       ],
                                     ),
                                   ),
@@ -2472,47 +2843,67 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Text(activeContactName, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: 1.5, shadows: [Shadow(color: Colors.black87, blurRadius: 4, offset: Offset(1, 1))])),
-                                    if (isCurrentlyLive) ...[
+                                    Text(
+                                      activeContactName, 
+                                      style: TextStyle(
+                                        color: _blockedContacts.contains(activeContactName) ? Colors.white54 : Colors.white, 
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w800, letterSpacing: 1.0, 
+                                        shadows: const [Shadow(color: Colors.black87, blurRadius: 4, offset: Offset(1, 1))]
+                                      )
+                                    ),
+                                    
+                                    if (_blockedContacts.contains(activeContactName)) ...[
                                       const SizedBox(height: 8),
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                                         decoration: BoxDecoration(
-                                            color: Colors.redAccent.withValues(alpha: 0.15),
-                                            borderRadius: BorderRadius.circular(20),
-                                            border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5), width: 1.5)
+                                          color: Colors.red.shade900.withValues(alpha: 0.8),
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5))
                                         ),
-                                        child: Row(
+                                        child: const Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            SizedBox(width: 12, height: 12, child: AnimatedBuilder(animation: _pulseController, builder: (context, child) { return Container(decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.redAccent.withValues(alpha: _pulseController.value))); })),
-                                            const SizedBox(width: 6),
-                                            Text(_formatDuration(_liveDuration), style: const TextStyle(color: Colors.redAccent, fontSize: 14, fontWeight: FontWeight.bold)),
+                                            Icon(Icons.block, color: Colors.white, size: 14),
+                                            SizedBox(width: 6),
+                                            Text("Engellendi", style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                                           ],
                                         ),
                                       ),
-                                    ] else if (allContacts[activeIndex]['status'] != null) ...[
-                                      const SizedBox(height: 4),
-                                      Text(allContacts[activeIndex]['status'] == UserStatus.offline ? _t('offline') : _t('online'), style: TextStyle(color: allContacts[activeIndex]['status'] == UserStatus.offline ? Colors.redAccent : Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.w600)),
-                                    ],
-
-                                    if (isCurrentlyLive) ...[
-                                      const SizedBox(height: 12),
-                                      GestureDetector(
-                                        onTap: _endLiveConnection,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                          decoration: BoxDecoration(color: Colors.redAccent.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.redAccent.withValues(alpha: 0.8), width: 1.5)),
+                                    ] else ...[
+                                      if (isCurrentlyLive) ...[
+                                        const SizedBox(height: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                          decoration: BoxDecoration(
+                                              color: Colors.redAccent.withValues(alpha: 0.15),
+                                              borderRadius: BorderRadius.circular(20),
+                                              border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5), width: 1.5)
+                                          ),
                                           child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                const Icon(Icons.phone_disabled, size: 18, color: Colors.redAccent),
-                                                const SizedBox(width: 8),
-                                                Text(_t('disconnect'), style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold))
-                                              ]
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              SizedBox(width: 12, height: 12, child: AnimatedBuilder(animation: _pulseController, builder: (context, child) { return Container(decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.redAccent.withValues(alpha: _pulseController.value))); })),
+                                              const SizedBox(width: 6),
+                                              Text(_formatDuration(_liveDuration), style: const TextStyle(color: Colors.redAccent, fontSize: 14, fontWeight: FontWeight.bold)),
+                                            ],
                                           ),
                                         ),
-                                      ),
+                                      ] else if (allContacts[activeIndex]['status'] != null) ...[
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Text(allContacts[activeIndex]['status'] == UserStatus.offline ? _t('offline') : _t('online'), style: TextStyle(color: allContacts[activeIndex]['status'] == UserStatus.offline ? Colors.redAccent : Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.w600)),
+                                            if (_mutedContacts.contains(activeContactName)) ...[
+                                              const SizedBox(width: 6),
+                                              const Icon(Icons.volume_off, color: Colors.white54, size: 14),
+                                            ],
+                                          ],
+                                        ),
+                                      ],
                                     ],
                                   ],
                                 ),
@@ -2594,6 +2985,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                               return OrbitContactNode(
                                 index: index,
                                 contact: displayContact,
+                                isBlocked: _blockedContacts.contains(displayContact['name'] ?? displayContact['phone']), 
                                 itemSpacingAngle: itemSpacingAngle,
                                 scrollOffset: _scrollOffset,
                                 menuX: menuX,
@@ -2611,17 +3003,14 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                                 myCustomColor: _myCustomColor,
                                 statusColor: allContacts[index]['status'] == UserStatus.offline ? Colors.redAccent : null,
                                 animVal: animVal,
-
                                 unreadCount: badgeCount,
                                 isMenuExpanded: anyMenuExpanded,
-
                                 onOpenContacts: () => _openContacts(initialIndex: index),
                                 onSearchedPersonSelected: () => _onSearchedPersonSelected(allContacts[index]),
                                 onPersonSelected: () => _onPersonSelected(index),
                                 onRequestLiveConnection: () => _requestLiveConnection(index),
-
+                                onDoubleTap: () => _handleDoubleTapNudge(index),
                                 onRemoveContact: () {},
-
                                 onNodeDragUpdate: (idx, offset) {
                                   setState(() { _interactionNodeIndex = idx; _interactionNodeOffset = offset; });
                                 },
@@ -2649,88 +3038,93 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                               curve: Curves.easeOutCubic,
                               right: !_isLeftHanded ? 8.0 : null,
                               left: _isLeftHanded ? 8.0 : null,
-                              top: menuY - 90,
+                              top: menuY - 130, 
                               child: AnimatedOpacity(
                                 duration: const Duration(milliseconds: 300),
                                 opacity: (activeIndex == -1 || allContacts[activeIndex]['isEmpty'] == true) && !showSearchField ? 1.0 : 0.0,
                                 child: IgnorePointer(
                                   ignoring: activeIndex != -1 || showSearchField,
-                                  child: Column(
-                                    crossAxisAlignment: !_isLeftHanded ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                    children: [
-                                      Padding(
-                                        padding: EdgeInsets.only(right: !_isLeftHanded ? 12.0 : 0.0, left: _isLeftHanded ? 12.0 : 0.0),
-                                        child: GestureDetector(
-                                          onTap: () {
-                                            if (hapticEnabled) { try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ } }
-                                            setState(() => _isMenuExpanded = !_isMenuExpanded);
-                                          },
-                                          child: Container(
-                                            width: 55, height: 55,
-                                            decoration: BoxDecoration(
-                                                color: _isArchiveMode ? Colors.orangeAccent.withValues(alpha: 0.2) : Colors.white12,
-                                                shape: BoxShape.circle,
-                                                border: Border.all(color: _isArchiveMode ? Colors.orangeAccent : Colors.white30, width: 2),
-                                                boxShadow: [if (_isArchiveMode) BoxShadow(color: Colors.orangeAccent.withValues(alpha: 0.4), blurRadius: 10)]
+                                  child: Container(
+                                    constraints: const BoxConstraints(maxWidth: 170),
+                                    child: Column(
+                                      crossAxisAlignment: !_isLeftHanded ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                      children: [
+                                        Padding(
+                                          padding: EdgeInsets.only(right: !_isLeftHanded ? 12.0 : 0.0, left: _isLeftHanded ? 12.0 : 0.0),
+                                          child: GestureDetector(
+                                            onTap: () {
+                                              if (hapticEnabled) { try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ } }
+                                              setState(() => _isMenuExpanded = !_isMenuExpanded);
+                                            },
+                                            child: Container(
+                                              width: 55, height: 55,
+                                              decoration: BoxDecoration(
+                                                  color: _isArchiveMode ? Colors.orangeAccent.withValues(alpha: 0.2) : Colors.white12,
+                                                  shape: BoxShape.circle,
+                                                  border: Border.all(color: _isArchiveMode ? Colors.orangeAccent : Colors.white30, width: 2),
+                                                  boxShadow: [if (_isArchiveMode) BoxShadow(color: Colors.orangeAccent.withValues(alpha: 0.4), blurRadius: 10)]
+                                              ),
+                                              child: Icon(_isMenuExpanded ? Icons.close : Icons.menu, color: _isArchiveMode ? Colors.orangeAccent : Colors.white, size: 28),
                                             ),
-                                            child: Icon(_isMenuExpanded ? Icons.close : Icons.menu, color: _isArchiveMode ? Colors.orangeAccent : Colors.white, size: 28),
                                           ),
                                         ),
-                                      ),
-                                      AnimatedContainer(
-                                        duration: const Duration(milliseconds: 300),
-                                        curve: Curves.easeOutCubic,
-                                        height: _isMenuExpanded ? 240 : 0,
-                                        alignment: !_isLeftHanded ? Alignment.topRight : Alignment.topLeft,
-                                        child: RawScrollbar(
-                                          controller: _mainMenuScrollController,
-                                          thumbVisibility: true,
-                                          thumbColor: Colors.cyanAccent.withValues(alpha: 0.4),
-                                          radius: const Radius.circular(20),
-                                          thickness: 4,
-                                          crossAxisMargin: 0,
-                                          child: SingleChildScrollView(
+                                        AnimatedContainer(
+                                          duration: const Duration(milliseconds: 300),
+                                          curve: Curves.easeOutCubic,
+                                          height: _isMenuExpanded ? 300 : 0, 
+                                          alignment: !_isLeftHanded ? Alignment.topRight : Alignment.topLeft,
+                                          child: RawScrollbar(
                                             controller: _mainMenuScrollController,
-                                            physics: const BouncingScrollPhysics(),
-                                            child: Padding(
-                                              padding: EdgeInsets.only(right: !_isLeftHanded ? 12.0 : 0.0, left: _isLeftHanded ? 12.0 : 0.0),
-                                              child: Column(
-                                                crossAxisAlignment: !_isLeftHanded ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                                children: [
-                                                  const SizedBox(height: 15),
-                                                  _buildLabeledMenuBtn(Icons.search, Colors.cyanAccent, _t('search'), () => _runSafeAction(() {
-                                                    setState(() {
-                                                      _isMenuExpanded = false;
-                                                      showSearchField = !showSearchField;
-                                                      if (!showSearchField) {
-                                                        _closeSearchMode();
-                                                      } else {
-                                                        Future.delayed(const Duration(milliseconds: 150), () {
-                                                          if (context.mounted) {
-                                                            FocusScope.of(context).requestFocus(_focusNode);
-                                                          }
-                                                        });
-                                                      }
-                                                    });
-                                                  })),
-                                                  _buildLabeledMenuBtn(Icons.bookmark, _isArchiveMode ? Colors.orangeAccent : Colors.orangeAccent, _t('saved'), () => _runSafeAction(() {
-                                                    _toggleArchiveMode();
-                                                  })),
-                                                  _buildLabeledMenuBtn(Icons.person_add, Colors.greenAccent, _t('add_contact'), () => _runSafeAction(() {
-                                                    setState(() => _isMenuExpanded = false);
-                                                    _openContacts();
-                                                  })),
-                                                  _buildLabeledMenuBtn(Icons.settings, Colors.grey, _t('settings'), () => _runSafeAction(() {
-                                                    setState(() => _isMenuExpanded = false);
-                                                    _openSettings();
-                                                  })),
-                                                ],
+                                            thumbVisibility: true,
+                                            thumbColor: Colors.cyanAccent.withValues(alpha: 0.4),
+                                            radius: const Radius.circular(20),
+                                            thickness: 4,
+                                            crossAxisMargin: 0,
+                                            scrollbarOrientation: _isLeftHanded ? ScrollbarOrientation.left : ScrollbarOrientation.right,
+                                            child: SingleChildScrollView(
+                                              controller: _mainMenuScrollController,
+                                              physics: const BouncingScrollPhysics(),
+                                              child: Padding(
+                                                padding: EdgeInsets.only(right: !_isLeftHanded ? 12.0 : 0.0, left: _isLeftHanded ? 12.0 : 0.0),
+                                                child: Column(
+                                                  crossAxisAlignment: !_isLeftHanded ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                                  children: [
+                                                    const SizedBox(height: 15),
+                                                    _buildLabeledMenuBtn(Icons.search, Colors.cyanAccent, _t('search'), () => _runSafeAction(() {
+                                                      setState(() {
+                                                        _isMenuExpanded = false;
+                                                        showSearchField = !showSearchField;
+                                                        if (!showSearchField) {
+                                                          _closeSearchMode();
+                                                        } else {
+                                                          Future.delayed(const Duration(milliseconds: 150), () {
+                                                            if (context.mounted) {
+                                                              FocusScope.of(context).requestFocus(_focusNode);
+                                                            }
+                                                          });
+                                                        }
+                                                      });
+                                                    })),
+                                                    _buildLabeledMenuBtn(Icons.bookmark, _isArchiveMode ? Colors.orangeAccent : Colors.orangeAccent, _t('saved'), () => _runSafeAction(() {
+                                                      _toggleArchiveMode();
+                                                    })),
+                                                    _buildLabeledMenuBtn(Icons.person_add, Colors.greenAccent, _t('add_contact'), () => _runSafeAction(() {
+                                                      setState(() => _isMenuExpanded = false);
+                                                      _openContacts();
+                                                    })),
+                                                    _buildLabeledMenuBtn(Icons.settings, Colors.grey, _t('settings'), () => _runSafeAction(() {
+                                                      setState(() => _isMenuExpanded = false);
+                                                      _openSettings();
+                                                    })),
+                                                    const SizedBox(height: 15),
+                                                  ],
+                                                ),
                                               ),
                                             ),
                                           ),
                                         ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
@@ -2741,130 +3135,139 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                               curve: Curves.easeOutCubic,
                               right: !_isLeftHanded ? 8.0 : null,
                               left: _isLeftHanded ? 8.0 : null,
-                              top: menuY - 90,
+                              top: menuY - 130, 
                               child: AnimatedOpacity(
                                 duration: const Duration(milliseconds: 300),
                                 opacity: (activeIndex != -1 && allContacts[activeIndex]['isEmpty'] != true) && !showSearchField ? 1.0 : 0.0,
                                 child: IgnorePointer(
                                   ignoring: activeIndex == -1 || allContacts[activeIndex]['isEmpty'] == true || showSearchField,
-                                  child: Column(
-                                    crossAxisAlignment: !_isLeftHanded ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                    children: [
-                                      Padding(
-                                        padding: EdgeInsets.only(right: !_isLeftHanded ? 12.0 : 0.0, left: _isLeftHanded ? 12.0 : 0.0),
-                                        child: GestureDetector(
-                                          onTap: () {
-                                            if (hapticEnabled) { try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ } }
-                                            setState(() => _isActiveMenuExpanded = !_isActiveMenuExpanded);
-                                          },
-                                          child: Container(
-                                            width: 55, height: 55,
-                                            decoration: BoxDecoration(
-                                              color: Colors.blueGrey.shade900.withValues(alpha: 0.6),
-                                              shape: BoxShape.circle,
-                                              border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.5), width: 2),
+                                  child: Container(
+                                    constraints: const BoxConstraints(maxWidth: 170),
+                                    child: Column(
+                                      crossAxisAlignment: !_isLeftHanded ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                      children: [
+                                        Padding(
+                                          padding: EdgeInsets.only(right: !_isLeftHanded ? 12.0 : 0.0, left: _isLeftHanded ? 12.0 : 0.0),
+                                          child: GestureDetector(
+                                            onTap: () {
+                                              if (hapticEnabled) { try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ } }
+                                              setState(() => _isActiveMenuExpanded = !_isActiveMenuExpanded);
+                                            },
+                                            child: Container(
+                                              width: 55, height: 55,
+                                              decoration: BoxDecoration(
+                                                color: Colors.blueGrey.shade900.withValues(alpha: 0.6),
+                                                shape: BoxShape.circle,
+                                                border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.5), width: 2),
+                                              ),
+                                              child: Icon(_isActiveMenuExpanded ? Icons.close : Icons.more_vert, color: Colors.cyanAccent, size: 28),
                                             ),
-                                            child: Icon(_isActiveMenuExpanded ? Icons.close : Icons.more_vert, color: Colors.cyanAccent, size: 28),
                                           ),
                                         ),
-                                      ),
-                                      AnimatedContainer(
-                                        duration: const Duration(milliseconds: 300),
-                                        curve: Curves.easeOutCubic,
-                                        height: _isActiveMenuExpanded ? 260.0 : 0.0,
-                                        alignment: !_isLeftHanded ? Alignment.topRight : Alignment.topLeft,
-                                        child: RawScrollbar(
-                                          controller: _activeMenuScrollController,
-                                          thumbVisibility: true,
-                                          thumbColor: Colors.cyanAccent.withValues(alpha: 0.4),
-                                          radius: const Radius.circular(20),
-                                          thickness: 4,
-                                          crossAxisMargin: 0,
-                                          child: SingleChildScrollView(
+                                        AnimatedContainer(
+                                          duration: const Duration(milliseconds: 300),
+                                          curve: Curves.easeOutCubic,
+                                          height: _isActiveMenuExpanded ? 360.0 : 0.0, 
+                                          alignment: !_isLeftHanded ? Alignment.topRight : Alignment.topLeft,
+                                          child: RawScrollbar(
                                             controller: _activeMenuScrollController,
-                                            physics: const BouncingScrollPhysics(),
-                                            child: Padding(
-                                              padding: EdgeInsets.only(right: !_isLeftHanded ? 12.0 : 0.0, left: _isLeftHanded ? 12.0 : 0.0),
-                                              child: Column(
-                                                crossAxisAlignment: !_isLeftHanded ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                                children: [
-                                                  const SizedBox(height: 15),
+                                            thumbVisibility: true,
+                                            thumbColor: Colors.cyanAccent.withValues(alpha: 0.4),
+                                            radius: const Radius.circular(20),
+                                            thickness: 4,
+                                            crossAxisMargin: 0,
+                                            scrollbarOrientation: _isLeftHanded ? ScrollbarOrientation.left : ScrollbarOrientation.right,
+                                            child: SingleChildScrollView(
+                                              controller: _activeMenuScrollController,
+                                              physics: const BouncingScrollPhysics(),
+                                              child: Padding(
+                                                padding: EdgeInsets.only(right: !_isLeftHanded ? 12.0 : 0.0, left: _isLeftHanded ? 12.0 : 0.0),
+                                                child: Column(
+                                                  crossAxisAlignment: !_isLeftHanded ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                                  children: [
+                                                    const SizedBox(height: 15),
 
-                                                  if (isGroup)
-                                                    _buildLabeledMenuBtn(Icons.touch_app, Colors.orangeAccent, _t('nudge_grp'), () => _runSafeAction(() {
+                                                    if (isGroup)
+                                                      _buildLabeledMenuBtn(Icons.touch_app, Colors.orangeAccent, _t('nudge_grp'), () => _runSafeAction(() {
+                                                        setState(() => _isActiveMenuExpanded = false);
+                                                        _openSubOrbit(SubOrbitType.nudge);
+                                                      })),
+
+                                                    _buildLabeledMenuBtn(Icons.add_reaction, Colors.pinkAccent, "Emoji", () => _runSafeAction(() {
                                                       setState(() => _isActiveMenuExpanded = false);
-                                                      _openSubOrbit(SubOrbitType.nudge);
+                                                      _openSubOrbit(SubOrbitType.emojis);
                                                     })),
 
-                                                  _buildLabeledMenuBtn(Icons.add_reaction, Colors.pinkAccent, _t('send_react'), () => _runSafeAction(() {
-                                                    setState(() => _isActiveMenuExpanded = false);
-                                                    _openSubOrbit(SubOrbitType.emojis);
-                                                  })),
-
-                                                  _buildLabeledMenuBtn(Icons.graphic_eq, Colors.cyanAccent, _t('voice_fx'), () => _runSafeAction(() {
-                                                    setState(() => _isActiveMenuExpanded = false);
-                                                    _openSubOrbit(SubOrbitType.effects);
-                                                  })),
-
-                                                  _buildLabeledMenuBtn(Icons.thumb_up, Colors.greenAccent, _t('roger'), () => _runSafeAction(() {
-                                                    setState(() => _isActiveMenuExpanded = false);
-                                                    _triggerReaction("👍");
-                                                    if (hapticEnabled) { try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ } }
-                                                    if (isGroup) {
-                                                      List<dynamic> members = allContacts[activeIndex]['members'] ?? [];
-                                                      for (var m in members) {
-                                                        SocketService().sendRogerThat(m.toString(), _currentUserPhone!, _userName);
-                                                      }
-                                                    } else {
-                                                      SocketService().sendRogerThat(allContacts[activeIndex]['phone'], _currentUserPhone!, _userName);
-                                                    }
-                                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('roger_sent'))));
-                                                  })),
-
-                                                  _buildLabeledMenuBtn(_showOnlyUnread ? Icons.filter_list_off : Icons.filter_list, Colors.amber, _t('filter'), () => _runSafeAction(() {
-                                                    setState(() {
-                                                      _showOnlyUnread = !_showOnlyUnread;
-                                                      _isActiveMenuExpanded = false;
-                                                    });
-                                                    if (hapticEnabled) { try { HapticFeedback.lightImpact(); } catch (_) { /* ignore */ } }
-                                                  })),
-
-                                                  _buildLabeledMenuBtn(_mutedContacts.contains(activeContactName) ? Icons.volume_off : Icons.volume_up, Colors.purpleAccent, _mutedContacts.contains(activeContactName) ? _t('unmute') : _t('mute'), () => _runSafeAction(() {
-                                                    setState(() {
-                                                      if (_mutedContacts.contains(activeContactName)) {
-                                                        _mutedContacts.remove(activeContactName);
+                                                    _buildLabeledMenuBtn(Icons.thumb_up, Colors.greenAccent, _t('roger'), () => _runSafeAction(() {
+                                                      setState(() => _isActiveMenuExpanded = false);
+                                                      _triggerReaction("👍");
+                                                      if (hapticEnabled) { try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ } }
+                                                      if (isGroup) {
+                                                        List<dynamic> members = allContacts[activeIndex]['members'] ?? [];
+                                                        for (var m in members) {
+                                                          SocketService().sendRogerThat(m.toString(), _currentUserPhone!, _userName);
+                                                        }
                                                       } else {
-                                                        _mutedContacts.add(activeContactName);
-                                                        if (isCurrentlyLive) { _endLiveConnection(); }
+                                                        SocketService().sendRogerThat(allContacts[activeIndex]['phone'], _currentUserPhone!, _userName);
                                                       }
-                                                      _isActiveMenuExpanded = false;
-                                                    });
-                                                  })),
+                                                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('roger_sent'))));
+                                                    })),
 
-                                                  _buildLabeledMenuBtn(_blockedContacts.contains(activeContactName) ? Icons.block : Icons.check_circle_outline, Colors.deepOrange, _blockedContacts.contains(activeContactName) ? _t('unblock') : _t('block'), () => _runSafeAction(() {
-                                                    setState(() {
-                                                      if (_blockedContacts.contains(activeContactName)) {
-                                                        _blockedContacts.remove(activeContactName);
-                                                      } else {
-                                                        _blockedContacts.add(activeContactName);
-                                                        if (isCurrentlyLive) { _endLiveConnection(); }
-                                                      }
-                                                      _isActiveMenuExpanded = false;
-                                                    });
-                                                  })),
+                                                    _buildLabeledMenuBtn(Icons.graphic_eq, Colors.cyanAccent, _t('voice_fx'), () => _runSafeAction(() {
+                                                      setState(() => _isActiveMenuExpanded = false);
+                                                      _openSubOrbit(SubOrbitType.effects);
+                                                    })),
 
-                                                  _buildLabeledMenuBtn(Icons.delete_outline, Colors.redAccent, _t('rm_orbit'), () => _runSafeAction(() {
-                                                    setState(() => _isActiveMenuExpanded = false);
-                                                    _promptDeleteActiveContact();
-                                                  })),
-                                                  const SizedBox(height: 12),
-                                                ],
+                                                    _buildLabeledMenuBtn(_mutedContacts.contains(activeContactName) ? Icons.volume_off : Icons.volume_up, Colors.purpleAccent, _mutedContacts.contains(activeContactName) ? _t('unmute') : _t('mute'), () => _runSafeAction(() {
+                                                      setState(() {
+                                                        if (_mutedContacts.contains(activeContactName)) {
+                                                          _mutedContacts.remove(activeContactName);
+                                                        } else {
+                                                          _mutedContacts.add(activeContactName);
+                                                          if (isCurrentlyLive) { _endLiveConnection(); }
+                                                        }
+                                                        _isActiveMenuExpanded = false;
+                                                      });
+                                                    })),
+
+                                                    _buildLabeledMenuBtn(Icons.format_color_fill, Colors.tealAccent, _t('bg_color'), () => _runSafeAction(() {
+                                                      setState(() => _isActiveMenuExpanded = false);
+                                                      _openSubOrbit(SubOrbitType.background);
+                                                    })),
+
+                                                    _buildLabeledMenuBtn(_showOnlyUnread ? Icons.filter_list_off : Icons.filter_list, Colors.amber, _t('filter'), () => _runSafeAction(() {
+                                                      setState(() {
+                                                        _showOnlyUnread = !_showOnlyUnread;
+                                                        _isActiveMenuExpanded = false;
+                                                      });
+                                                      if (hapticEnabled) { try { HapticFeedback.lightImpact(); } catch (_) { /* ignore */ } }
+                                                    })),
+
+                                                    _buildLabeledMenuBtn(_blockedContacts.contains(activeContactName) ? Icons.block : Icons.check_circle_outline, Colors.deepOrange, _blockedContacts.contains(activeContactName) ? _t('unblock') : _t('block'), () => _runSafeAction(() {
+                                                      setState(() {
+                                                        if (_blockedContacts.contains(activeContactName)) {
+                                                          _blockedContacts.remove(activeContactName);
+                                                        } else {
+                                                          _blockedContacts.add(activeContactName);
+                                                          if (isCurrentlyLive) { _endLiveConnection(); }
+                                                        }
+                                                        _isActiveMenuExpanded = false;
+                                                      });
+                                                    })),
+
+                                                    _buildLabeledMenuBtn(Icons.delete_outline, Colors.redAccent, _t('rm_orbit'), () => _runSafeAction(() {
+                                                      setState(() => _isActiveMenuExpanded = false);
+                                                      _promptDeleteActiveContact();
+                                                    })),
+                                                    const SizedBox(height: 15),
+                                                  ],
+                                                ),
                                               ),
                                             ),
                                           ),
                                         ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
@@ -2873,21 +3276,70 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                             if (_activeSubOrbit != SubOrbitType.none)
                               Positioned.fill(
                                 child: GestureDetector(
-                                  onTap: () => setState(() => _activeSubOrbit = SubOrbitType.none),
-                                  onVerticalDragUpdate: (details) {
+                                  onTap: () {
+                                      _subScrollPhysicsController.stop();
+                                      setState(() => _activeSubOrbit = SubOrbitType.none);
+                                  },
+                                  onPanStart: (details) {
+                                      _subScrollPhysicsController.stop(); 
+                                      double dx = details.localPosition.dx - menuX;
+                                      double dy = details.localPosition.dy - menuY;
+                                      _lastSubDragAngle = math.atan2(dy, dx);
+                                      _isValidSubOrbitDrag = true;
+                                  },
+                                  onPanUpdate: (details) {
+                                    if (!_isValidSubOrbitDrag) return;
+                                    double dx = details.localPosition.dx - menuX;
+                                    double dy = details.localPosition.dy - menuY;
+                                    double currentAngle = math.atan2(dy, dx);
+                                    double deltaAngle = currentAngle - _lastSubDragAngle;
+
+                                    if (deltaAngle > math.pi) deltaAngle -= 2 * math.pi;
+                                    if (deltaAngle < -math.pi) deltaAngle += 2 * math.pi;
+
+                                    deltaAngle *= 0.5;
+
                                     setState(() {
-                                      double maxSubScroll = (_getSubOrbitItems().length * itemSpacingAngle) - (4 * itemSpacingAngle);
-                                      if (maxSubScroll < 0) {
-                                        maxSubScroll = 0;
+                                      if (_isLeftHanded) {
+                                        _subOrbitScrollOffset -= deltaAngle;
+                                      } else {
+                                        _subOrbitScrollOffset += deltaAngle;
                                       }
-                                      _subOrbitScrollOffset -= details.delta.dy * 0.005;
+                                      
                                       if (_subOrbitScrollOffset < -0.2) {
                                         _subOrbitScrollOffset = -0.2;
                                       }
                                       if (_subOrbitScrollOffset > maxSubScroll) {
                                         _subOrbitScrollOffset = maxSubScroll;
                                       }
+                                      
+                                      _lastSubDragAngle = currentAngle;
+
+                                      if (_ratchetEnabled) {
+                                        _subRatchetAccumulator += deltaAngle.abs();
+                                        double threshold = Platform.isAndroid ? 0.20 : 0.15;
+                                        int debounceTime = Platform.isAndroid ? 120 : 80;
+                                        
+                                        if (_subRatchetAccumulator >= threshold) {
+                                          _subRatchetAccumulator -= threshold;
+                                          int now = DateTime.now().millisecondsSinceEpoch;
+                                          if (now - _lastSubRatchetTime > debounceTime) {
+                                            _lastSubRatchetTime = now;
+                                            if (hapticEnabled) {
+                                              try {
+                                                if (Platform.isAndroid) HapticFeedback.vibrate();
+                                                else HapticFeedback.selectionClick();
+                                              } catch (_) {}
+                                            }
+                                          }
+                                        }
+                                      }
                                     });
+                                  },
+                                  onPanEnd: (details) {
+                                      _isValidSubOrbitDrag = false;
+                                      double velocity = details.velocity.pixelsPerSecond.dx + details.velocity.pixelsPerSecond.dy;
+                                      _runPhysicsSimulation(velocity, _subScrollPhysicsController, _subOrbitScrollOffset, maxSubScroll);
                                   },
                                   child: Container(
                                     color: Colors.black.withValues(alpha: 0.7),
@@ -2895,17 +3347,20 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                                       filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                                       child: Stack(
                                         children: [
+                                          
                                           Positioned(
-                                            top: menuY - 140,
+                                            top: 100, 
                                             left: 0, right: 0,
                                             child: Center(
                                               child: Text(
                                                 _activeSubOrbit == SubOrbitType.effects ? _t('choose_fx') :
+                                                _activeSubOrbit == SubOrbitType.background ? _t('choose_bg') :
                                                 _activeSubOrbit == SubOrbitType.emojis ? _t('send_re_title') : _t('nudge_grp_title'),
                                                 style: const TextStyle(color: Colors.white70, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 2.0),
                                               ),
                                             ),
                                           ),
+                                          
                                           ...List.generate(_getSubOrbitItems().length, (index) {
                                             final items = _getSubOrbitItems();
                                             return OrbitSubItemNode(
@@ -2967,117 +3422,111 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                                 child: AnimatedSwitcher(duration: const Duration(milliseconds: 300), child: OrbitSearchField(controller: _searchController, focusNode: _focusNode,hintText: _t('search_orbit'), onChanged: _handleSearch, onClear: () { _searchController.clear(); _handleSearch(""); })),
                               ),
                               
-// ==========================================
-// 🟢 BURASI MİKROFON (ORBIT PTT AREA) - MERKEZ KOORDİNATI
-// ==========================================
-Positioned(
-  left: menuX - 162.5, 
-  top: menuY - 162.5,
-  child: AnimatedOpacity(
-    duration: const Duration(milliseconds: 300),
-    opacity: (showSearchField || anyMenuExpanded) ? 0.15 : 1.0,
-    child: Transform.scale(
-      scale: 1.1,
-      child: IgnorePointer(
-        ignoring: showSearchField || anyMenuExpanded,
-        child: OrbitPttArea(
-          isIncomingCallActive: _isIncomingCallActive,
-          isRecording: isRecording,
-          isCancelled: _isCancelled,
-          isWaitingForLiveApproval: isWaitingForLiveApproval,
-          isLive: anyLiveActive,
-          isLeftHanded: _isLeftHanded,
-          dragOffset: _dragOffset,
-          dragVerticalOffset: _dragVerticalOffset,
-          pttSlideOffset: _pttSlideOffset,
-          hapticRejectPulseController: _hapticRejectPulseController,
-          hapticAcceptPulseController: _hapticAcceptPulseController,
-          entranceController: _entranceController,
-          pulseController: _pulseController,
-          audioLevel: _audioLevel,
-          recordDurationText: _formatDuration(_recordDuration),
-          isNodeBeingPulledInward: _interactionNodeIndex != -1 && _interactionNodeOffset <= -50,
-          onPointerDown: isWaitingForLiveApproval ? (_) {} : (_) { if (!_isIncomingCallActive) _startRecording(); },
-          onPointerMove: (details) { 
-            if (_isIncomingCallActive) { 
-              setState(() { 
-                _pttSlideOffset += details.delta.dx; 
-                _pttSlideOffset = _pttSlideOffset.clamp(-100.0, 100.0); 
-              }); 
-            } else { 
-              _updateRecordingPointer(details); 
-            } 
-          },
-          onPointerUp: (_) {
-            if (_isIncomingCallActive) {
-              if (_pttSlideOffset > 70) { _acceptIncomingCall(); } 
-              else if (_pttSlideOffset < -70) { _rejectIncomingCall(); } 
-              else { setState(() { _pttSlideOffset = 0.0; }); }
-            } else { 
-              _stopRecording(); 
-            }
-          },
-          onPointerCancel: (_) { 
-            if (_isIncomingCallActive) { 
-              setState(() { _pttSlideOffset = 0.0; }); 
-            } else { 
-              _stopRecording(); 
-            } 
-          },
-          onTapCancelCall: () { if (isWaitingForLiveApproval) _cancelOutgoingCall(); },
-          buildCallingWave: (index) {
-            return AnimatedBuilder(
-              animation: _breatheController,
-              builder: (context, child) {
-                double sizeMultiplier = 1.0 + (_breatheController.value * (0.3 + (index * 0.2)));
-                return Container(
-                  width: 117 * sizeMultiplier, 
-                  height: 117 * sizeMultiplier, 
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle, 
-                    border: Border.all(
-                      color: Colors.redAccent.withValues(alpha: (0.3 - (_breatheController.value * 0.2)).clamp(0.0, 1.0)), 
-                      width: 2.0
-                    )
-                  )
-                );
-              }
-            );
-          },
-          buildRealWave: (index) {
-            return ValueListenableBuilder<double>(
-              valueListenable: _audioLevel,
-              builder: (context, level, child) {
-                double sizeMultiplier = 1.0 + (level * (1.2 + (index * 0.4)));
-                return TweenAnimationBuilder(
-                  key: ValueKey(index), 
-                  tween: Tween(begin: 1.0, end: sizeMultiplier), 
-                  duration: const Duration(milliseconds: 100),
-                  builder: (context, double val, _) { 
-                    return Container(
-                      width: 117 * val, 
-                      height: 117 * val, 
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle, 
-                        border: Border.all(
-                          color: Colors.redAccent.withValues(alpha: (0.4 - (level * 0.2)).clamp(0.1, 1.0)), 
-                          width: 2 + (level * 2)
-                        )
-                      )
-                    ); 
-                  },
-                );
-              },
-            );
-          },
-        )
-      ),
-    ),
-  ),
-),
-// ==========================================
-// 🔴 MİKROFON BLOĞU BİTİŞİ
-// ==========================================
+                            Positioned(
+                              left: menuX - 162.5, 
+                              top: menuY - 162.5,
+                              child: AnimatedOpacity(
+                                duration: const Duration(milliseconds: 300),
+                                opacity: (showSearchField || anyMenuExpanded) ? 0.15 : 1.0,
+                                child: Transform.scale(
+                                  scale: 1.1,
+                                  child: IgnorePointer(
+                                    ignoring: showSearchField || anyMenuExpanded,
+                                    child: OrbitPttArea(
+                                      isIncomingCallActive: _isIncomingCallActive,
+                                      isRecording: isRecording,
+                                      isCancelled: _isCancelled,
+                                      isWaitingForLiveApproval: isWaitingForLiveApproval,
+                                      isLive: anyLiveActive,
+                                      isLeftHanded: _isLeftHanded,
+                                      dragOffset: _dragOffset,
+                                      dragVerticalOffset: _dragVerticalOffset,
+                                      pttSlideOffset: _pttSlideOffset,
+                                      hapticRejectPulseController: _hapticRejectPulseController,
+                                      hapticAcceptPulseController: _hapticAcceptPulseController,
+                                      entranceController: _entranceController,
+                                      pulseController: _pulseController,
+                                      audioLevel: _audioLevel,
+                                      recordDurationText: _formatDuration(_recordDuration),
+                                      isNodeBeingPulledInward: _interactionNodeIndex != -1 && _interactionNodeOffset <= -50,
+                                      onPointerDown: isWaitingForLiveApproval ? (_) {} : (_) { if (!_isIncomingCallActive) _startRecording(); },
+                                      onPointerMove: (details) { 
+                                        if (_isIncomingCallActive) { 
+                                          setState(() { 
+                                            _pttSlideOffset += details.delta.dx; 
+                                            _pttSlideOffset = _pttSlideOffset.clamp(-100.0, 100.0); 
+                                          }); 
+                                        } else { 
+                                          _updateRecordingPointer(details); 
+                                        } 
+                                      },
+                                      onPointerUp: (_) {
+                                        if (_isIncomingCallActive) {
+                                          if (_pttSlideOffset > 70) { _acceptIncomingCall(); } 
+                                          else if (_pttSlideOffset < -70) { _rejectIncomingCall(); } 
+                                          else { setState(() { _pttSlideOffset = 0.0; }); }
+                                        } else { 
+                                          _stopRecording(); 
+                                        }
+                                      },
+                                      onPointerCancel: (_) { 
+                                        if (_isIncomingCallActive) { 
+                                          setState(() { _pttSlideOffset = 0.0; }); 
+                                        } else { 
+                                          _stopRecording(); 
+                                        } 
+                                      },
+                                      onTapCancelCall: () { if (isWaitingForLiveApproval) _cancelOutgoingCall(); },
+                                      buildCallingWave: (index) {
+                                        return AnimatedBuilder(
+                                          animation: _breatheController,
+                                          builder: (context, child) {
+                                            double sizeMultiplier = 1.0 + (_breatheController.value * (0.3 + (index * 0.2)));
+                                            return Container(
+                                              width: 117 * sizeMultiplier, 
+                                              height: 117 * sizeMultiplier, 
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle, 
+                                                border: Border.all(
+                                                  color: Colors.redAccent.withValues(alpha: (0.3 - (_breatheController.value * 0.2)).clamp(0.0, 1.0)), 
+                                                  width: 2.0
+                                                )
+                                              )
+                                            );
+                                          }
+                                        );
+                                      },
+                                      buildRealWave: (index) {
+                                        return ValueListenableBuilder<double>(
+                                          valueListenable: _audioLevel,
+                                          builder: (context, level, child) {
+                                            double sizeMultiplier = 1.0 + (level * (1.2 + (index * 0.4)));
+                                            return TweenAnimationBuilder(
+                                              key: ValueKey(index), 
+                                              tween: Tween(begin: 1.0, end: sizeMultiplier), 
+                                              duration: const Duration(milliseconds: 100),
+                                              builder: (context, double val, _) { 
+                                                return Container(
+                                                  width: 117 * val, 
+                                                  height: 117 * val, 
+                                                  decoration: BoxDecoration(
+                                                    shape: BoxShape.circle, 
+                                                    border: Border.all(
+                                                      color: Colors.redAccent.withValues(alpha: (0.4 - (level * 0.2)).clamp(0.1, 1.0)), 
+                                                      width: 2 + (level * 2)
+                                                    )
+                                                  )
+                                                ); 
+                                              },
+                                            );
+                                          },
+                                        );
+                                      },
+                                    )
+                                  ),
+                                ),
+                              ),
+                            ),
 
                             if (!showSearchField && _activeSubOrbit == SubOrbitType.none)
                               Positioned(

@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:273325396141:android:ff6ba4e55c36238ab17624",
+        "mobilesdk_app_id": "1:273325396141:android:9fb1878e96554b24b17624",
         "android_client_info": {
-          "package_name": "com.crenno.orbit"
+          "package_name": "com.crenno.orbitptt"
         }
       },
       "oauth_client": [],

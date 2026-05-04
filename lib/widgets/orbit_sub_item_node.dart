@@ -36,7 +36,6 @@ class OrbitSubItemNode extends StatelessWidget {
       baseOpacity = 0.0;
     }
 
-    // Orijinal dosyadaki mükemmel kenar kaybolma (Fade) matematiği korundu!
     double fadeOpacity = 1.0;
     double fadeDistance = 40.0;
     double tempX = menuX + orbitRadius * math.cos(angle);
@@ -78,43 +77,47 @@ class OrbitSubItemNode extends StatelessWidget {
     Color itemColor = item['color'] ?? Colors.cyanAccent;
 
     return Positioned(
-      left: menuX + xOffset - 50, // 🟢 100x100 olduğu için merkeze hizalamak adına -50 yapıldı
+      left: menuX + xOffset - 50, 
       top: menuY + yOffset - 50,
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 200),
         opacity: finalOpacity,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: onTap,
+        child: IgnorePointer(
+          ignoring: finalOpacity < 0.2, // Şeffafken tıklanmayı iptal et
           child: SizedBox(
-            width: 100, height: 100, // 🟢 Boyut Kişi Widget'ları ile eşitlendi (100x100)
+            width: 100, height: 100, 
             child: Stack(
               alignment: Alignment.center,
               children: [
-                // 🟢 Sadece Ses Efektleri/Dürtmeler için kavisli yazıyı çiz. Emojiyse ÇİZME!
                 if (item['emoji'] == null)
                   CustomPaint(
                     painter: CurvedTextPainter(
                       text: name.toUpperCase(),
-                      radius: 46, // Yarıçap kişi widget'ı ile aynı yapıldı
+                      radius: 46, 
                       color: itemColor,
                       baseAngle: globalAngle,
                     ),
                   ),
                 
-                // 🟢 İç Avatar Kutusu boyutu ve Fontlar büyütüldü
-                Container(
-                  width: 60, height: 60,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.black87,
-                    border: Border.all(color: itemColor.withValues(alpha: 0.4), width: 1.5),
-                    boxShadow: [BoxShadow(color: itemColor.withValues(alpha: 0.2), blurRadius: 8)],
+                // 🟢 REVİZYON 3: HALKA BOYUTLARI ANA EKRANDAKİ KİŞİ WIDGET'I İLE BİREBİR AYNI YAPILDI (60 -> 72)
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onTap,
+                  child: Container(
+                    width: 72, height: 72,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.black87,
+                      border: Border.all(color: itemColor.withValues(alpha: 0.9), width: 2.5),
+                      boxShadow: [
+                        BoxShadow(color: itemColor.withValues(alpha: 0.5), blurRadius: 12, spreadRadius: 3)
+                      ],
+                    ),
+                    alignment: Alignment.center,
+                    child: item['emoji'] != null 
+                      ? Text(item['emoji'], style: const TextStyle(fontSize: 34)) 
+                      : Icon(item['icon'], color: itemColor, size: 32), 
                   ),
-                  alignment: Alignment.center,
-                  child: item['emoji'] != null 
-                    ? Text(item['emoji'], style: const TextStyle(fontSize: 32)) // 🟢 Emoji devasa oldu
-                    : Icon(item['icon'], color: itemColor, size: 28), // 🟢 İkonlar da büyütüldü
                 )
               ],
             ),
