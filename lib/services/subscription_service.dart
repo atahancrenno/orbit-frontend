@@ -1,32 +1,40 @@
 import 'package:flutter/material.dart';
 import 'package:adapty_flutter/adapty_flutter.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../screens/paywall_screen.dart';
+import '../screens/orbit_plus_screen.dart';
 
 class SubscriptionService {
-  static const String premiumKey = 'is_orbit_plus';
+  // 🚨 DİKKAT: Adapty panelinde Placement ID olarak ne belirlediysen onu buraya yaz.
+  // Ekran görüntüsünde adını "Ana Yerleşim" yapmışsın, eğer ID'sini "main_placement" yaptıysan sorun yok.
+  static const String placementId = "main_placement";
 
-  // 1. Durumu Kontrol Et (Hem Yerel Hem Sunucu)
+  // Kullanıcının Orbit Plus üyesi olup olmadığını kontrol eden altın fonksiyon
   static Future<bool> isPremium() async {
     try {
       final profile = await Adapty().getProfile();
-      bool active = profile.accessLevels['premium']?.isActive ?? false;
-      
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(premiumKey, active);
-      
-      return active;
+      // Adapty panelinde oluşturduğumuz Access Level ID'si: premium
+      return profile.accessLevels['premium']?.isActive ?? false;
     } catch (e) {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getBool(premiumKey) ?? false;
+      debugPrint("🚨 Premium Kontrol Hatası: $e");
+      return false;
     }
   }
 
-  // 2. Paywall'u Açma Fonksiyonu
+  // Ödeme ekranını (Orbit Plus Vitrinini) açan fonksiyon
   static void showPaywall(BuildContext context) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => const PaywallScreen()),
+      MaterialPageRoute(builder: (context) => const OrbitPlusScreen()),
     );
+  }
+
+  // Kullanıcı cihaz değiştirirse satın alımlarını geri yüklemesi için
+  static Future<bool> restorePurchases() async {
+    try {
+      final profile = await Adapty().restorePurchases();
+      return profile.accessLevels['premium']?.isActive ?? false;
+    } catch (e) {
+      debugPrint("🚨 Satın Alım Geri Yükleme Hatası: $e");
+      return false;
+    }
   }
 }

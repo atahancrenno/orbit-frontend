@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:adapty_flutter/adapty_flutter.dart'; // 🟢 ADAPTY EKLENDİ
+import 'package:adapty_flutter/adapty_flutter.dart'; 
 import 'dart:ui';
 
 import 'orbit_main_screen.dart';
@@ -18,20 +18,23 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
   late Animation<Offset> _slideAnimation;
 
   String _currentLang = 'tr';
-  bool _isLoading = false; 
+  bool _isLoading = true; 
+  bool _isPurchasing = false;
+  
+  // Adapty Değişkenleri (_paywall kullanmadığımız için linter uyarısı vermesin diye kaldırdık)
+  List<AdaptyPaywallProduct>? _products;
 
   final Map<String, Map<String, String>> _texts = {
     'title': {'tr': 'Orbit Plus', 'en': 'Orbit Plus', 'de': 'Orbit Plus', 'ru': 'Orbit Plus'},
     'subtitle': {'tr': 'Sınırları Aşan Kesintisiz İletişim', 'en': 'Seamless Communication Beyond Limits', 'de': 'Nahtlose Kommunikation über Grenzen hinweg', 'ru': 'Бесшовная связь без границ'},
     'feat_1_title': {'tr': 'Reklamsız Ses Efektleri', 'en': 'Ad-Free Voice Effects'},
     'feat_1_desc': {'tr': 'Tüm frekanslara ve ses efektlerine anında, reklamsız erişim sağlayın.', 'en': 'Instant, ad-free access to all frequencies and voice effects.'},
-    'feat_2_title': {'tr': 'Genişletilmiş Grup Ağları', 'en': 'Extended Group Networks'},
-    'feat_2_desc': {'tr': 'Daha kalabalık gruplar kurun ve iletişiminizi genişletin.', 'en': 'Create larger groups and expand your communication.'},
-    'feat_3_title': {'tr': 'Sınırsız Mesaj Arşivi', 'en': 'Unlimited Message Archive'},
-    'feat_3_desc': {'tr': 'Önemli telsiz kayıtlarınızı süre sınırı olmadan güvenle saklayın.', 'en': 'Safely store your important radio logs without time limits.'},
-    'feat_4_title': {'tr': 'Yüksek Kaliteli Ses', 'en': 'High-Quality Audio'},
-    'feat_4_desc': {'tr': 'Kristal netliğinde, stüdyo kalitesinde ses iletimi deneyimleyin.', 'en': 'Experience crystal clear, studio-quality audio transmission.'},
-    'btn_upgrade': {'tr': 'Orbit Plus\'a Geç', 'en': 'Upgrade to Orbit Plus'},
+    'feat_2_title': {'tr': 'Sınırsız İletişim', 'en': 'Unlimited Communication'},
+    'feat_2_desc': {'tr': 'Limitlere takılmadan, grup ve kişilere sınırsız dürtme gönderin.', 'en': 'Send unlimited nudges to groups and individuals without hitting limits.'},
+    'feat_3_title': {'tr': 'Özel Yörünge Temaları', 'en': 'Custom Orbit Themes'},
+    'feat_3_desc': {'tr': 'Premium ve özel temalar ile telsiz deneyiminizi kişiselleştirin.', 'en': 'Personalize your radio experience with premium and custom themes.'},
+    'feat_4_title': {'tr': 'Yüksek Kapasite', 'en': 'High Capacity'},
+    'feat_4_desc': {'tr': 'Yörüngenizdeki kişi sınırını kaldırıp tüm dünyayı ekleyin.', 'en': 'Remove the contact limit on your orbit and add the whole world.'},
     'btn_skip': {'tr': 'Geri Dön', 'en': 'Go Back'},
     'restore': {'tr': 'Satın Almaları Geri Yükle', 'en': 'Restore Purchases'},
   };
@@ -48,11 +51,37 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
     _slideAnimation = Tween<Offset>(begin: const Offset(0, 0.2), end: Offset.zero).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic));
     _animController.forward();
+    
+    _loadPaywall(); 
   }
 
   Future<void> _loadLanguage() async {
     final prefs = await SharedPreferences.getInstance();
-    if (mounted) setState(() => _currentLang = prefs.getString('app_lang') ?? 'tr');
+    if (mounted) {
+      setState(() { _currentLang = prefs.getString('app_lang') ?? 'tr'; });
+    }
+  }
+
+  // 🚀 ADAPTY FİYATLARI ÇEKME VE PAYWALL GÖSTERİMİ
+  Future<void> _loadPaywall() async {
+    try {
+      final paywall = await Adapty().getPaywall(placementId: 'main_placement');
+      final products = await Adapty().getPaywallProducts(paywall: paywall);
+      
+      await Adapty().logShowPaywall(paywall: paywall);
+
+      if (mounted) {
+        setState(() {
+          _products = products;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("🚨 Paywall Çekilemedi: $e");
+      if (mounted) {
+        setState(() { _isLoading = false; });
+      }
+    }
   }
 
   @override
@@ -62,41 +91,42 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
   }
 
   void _goBack() {
-    if (Navigator.canPop(context)) Navigator.pop(context); 
-    else Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const OrbitMainScreen()));
-  }
-
-  // 🚀 GERÇEK SATIN ALMA AKIŞI (ADAPTY V3)
-  Future<void> _startPurchaseFlow() async {
-    setState(() => _isLoading = true);
-
-    try {
-      final paywall = await Adapty().getPaywall(placementId: 'default_placement');
-      final products = await Adapty().getPaywallProducts(paywall: paywall);
-
-      if (products.isNotEmpty) {
-        final result = await Adapty().makePurchase(product: products.first);
-
-        if (result is AdaptyPurchaseResultSuccess && result.profile.accessLevels['premium']?.isActive == true) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool('is_orbit_plus', true);
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Aramıza hoş geldin Komutan! Orbit Plus devrede."), backgroundColor: Colors.amber));
-            _goBack();
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint("Satın alma hatası: $e");
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context); 
+    } else {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const OrbitMainScreen()));
     }
   }
 
-  // 🛡️ GERİ YÜKLEME (ADAPTY V3)
+  // 🚀 GERÇEK SATIN ALMA AKIŞI (ADAPTY V3 UYARLAMASI YAPILDI)
+  Future<void> _startPurchaseFlow(AdaptyPaywallProduct product) async {
+    setState(() { _isPurchasing = true; });
+
+    try {
+      final result = await Adapty().makePurchase(product: product);
+
+      // Adapty v3'te dönen nesne Result tipindedir, başarı durumuna göre içinden profili alırız
+      if (result is AdaptyPurchaseResultSuccess && result.profile.accessLevels['premium']?.isActive == true) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('is_orbit_plus', true);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Aramıza hoş geldin Komutan! Orbit Plus devrede. 🚀"), backgroundColor: Colors.amber));
+          _goBack();
+        }
+      }
+    } catch (e) {
+      debugPrint("🚨 Satın Alma İptal veya Hatası: $e");
+    } finally {
+      if (mounted) {
+        setState(() { _isPurchasing = false; });
+      }
+    }
+  }
+
+  // 🛡️ GERİ YÜKLEME (RESTORE)
   Future<void> _restorePurchases() async {
-    setState(() => _isLoading = true);
+    setState(() { _isLoading = true; });
     try {
       final profile = await Adapty().restorePurchases();
       if (profile.accessLevels['premium']?.isActive == true) {
@@ -107,12 +137,16 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
           _goBack();
         }
       } else {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Geri yüklenecek aktif abonelik bulunamadı."), backgroundColor: Colors.orange));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Geri yüklenecek aktif abonelik bulunamadı."), backgroundColor: Colors.orange));
+        }
       }
     } catch (e) {
-      debugPrint("Geri yükleme hatası: $e");
+      debugPrint("🚨 Geri yükleme hatası: $e");
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() { _isLoading = false; });
+      }
     }
   }
 
@@ -179,8 +213,8 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
                               const SizedBox(height: 40),
                               _buildFeatureRow(Icons.mic_off, 'feat_1_title', 'feat_1_desc'),
                               _buildFeatureRow(Icons.groups, 'feat_2_title', 'feat_2_desc'),
-                              _buildFeatureRow(Icons.all_inbox, 'feat_3_title', 'feat_3_desc'),
-                              _buildFeatureRow(Icons.high_quality, 'feat_4_title', 'feat_4_desc'),
+                              _buildFeatureRow(Icons.color_lens, 'feat_3_title', 'feat_3_desc'),
+                              _buildFeatureRow(Icons.all_inclusive, 'feat_4_title', 'feat_4_desc'),
                             ],
                           ),
                         ),
@@ -192,23 +226,31 @@ class _OrbitPlusScreenState extends State<OrbitPlusScreen> with SingleTickerProv
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        SizedBox(
-                          width: double.infinity, height: 56,
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 10, shadowColor: Colors.amber.withValues(alpha: 0.5)),
-                            onPressed: _isLoading ? null : _startPurchaseFlow,
-                            child: _isLoading 
-                                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
-                                : Text(_t('btn_upgrade'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-                          ),
-                        ),
+                        if (_isLoading)
+                          const Center(child: Padding(padding: EdgeInsets.all(16.0), child: CircularProgressIndicator(color: Colors.amber)))
+                        else if (_products == null || _products!.isEmpty)
+                          const Center(child: Padding(padding: EdgeInsets.all(16.0), child: Text("Fiyat bilgisi yüklenemedi. Lütfen internet bağlantınızı kontrol edin.", textAlign: TextAlign.center, style: TextStyle(color: Colors.white54))))
+                        else
+                          ..._products!.map((product) {
+                            return SizedBox(
+                              width: double.infinity, height: 60,
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 10, shadowColor: Colors.amber.withValues(alpha: 0.5)),
+                                onPressed: _isPurchasing ? null : () => _startPurchaseFlow(product),
+                                child: _isPurchasing 
+                                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
+                                    // 🟢 ADAPTY V3 Fiyat Çekme Uyarlaması Yapıldı
+                                    : Text("Orbit Plus'a Geç - ${product.price.localizedString} / Ay", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                              ),
+                            );
+                          }),
                         const SizedBox(height: 12),
                         TextButton(
                           onPressed: _goBack,
                           child: Text(_t('btn_skip'), style: const TextStyle(color: Colors.white54, fontSize: 14, fontWeight: FontWeight.w600)),
                         ),
                         TextButton(
-                          onPressed: _isLoading ? null : _restorePurchases,
+                          onPressed: (_isLoading || _isPurchasing) ? null : _restorePurchases,
                           child: Text(_t('restore'), style: const TextStyle(color: Colors.white30, fontSize: 12, decoration: TextDecoration.underline)),
                         ),
                         const SizedBox(height: 10),

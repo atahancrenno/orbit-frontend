@@ -9,7 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_html/flutter_html.dart'; 
 import '../constants/legal_texts.dart'; 
 
-import '../screens/orbit_plus_screen.dart'; 
+
 import '../services/subscription_service.dart';
 
 class SettingsBottomSheet extends StatefulWidget {

@@ -1,4 +1,4 @@
-// ignore_for_file: prefer_final_fields
+// ignore_for_file: prefer_final_fields, curly_braces_in_flow_control_structures, deprecated_member_use, use_build_context_synchronously, unnecessary_non_null_assertion
 
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart'; 
@@ -186,6 +186,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
 
   RewardedAd? _rewardedAd;
   bool _isAdLoaded = false;
+  bool _isAdPlaying = false; // 🟢 YENİ: Reklam izleniyor mu kilidi
 
   bool _isActionInProgress = false;
 
@@ -444,10 +445,29 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
 
   void _showRewardedAdGeneric(VoidCallback? onReward) {
     if (_isAdLoaded && _rewardedAd != null) {
+      
+      setState(() { _isAdPlaying = true; }); // 🟢 KİLİDİ KAPAT (SESLERİ BEKLET)
+
+      // Reklam kapandığında (ödül alınsa da alınmasa da) çalışacak tetikleyici
+      _rewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
+        onAdDismissedFullScreenContent: (ad) {
+          ad.dispose();
+          setState(() { _isAdPlaying = false; }); // 🟢 KİLİDİ AÇ
+          _processLiveQueue(); // 🟢 BEKLEYEN SESLERİ ÇALMAYA BAŞLA!
+          _isAdLoaded = false;
+          _loadRewardedAd();
+        },
+        onAdFailedToShowFullScreenContent: (ad, error) {
+          ad.dispose();
+          setState(() { _isAdPlaying = false; }); // 🟢 KİLİDİ AÇ
+          _processLiveQueue(); // 🟢 BEKLEYEN SESLERİ ÇALMAYA BAŞLA!
+          _isAdLoaded = false;
+          _loadRewardedAd();
+        },
+      );
+
       _rewardedAd!.show(onUserEarnedReward: (AdWithoutView ad, RewardItem reward) {
         if (onReward != null) onReward();
-        _isAdLoaded = false;
-        _loadRewardedAd();
       });
     } else {
       if (onReward != null) onReward();
@@ -689,7 +709,8 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   }
 
   Future<void> _processLiveQueue() async {
-    if (_isProcessingLiveQueue || _liveAudioQueue.isEmpty) {
+    // 🟢 YENİ: Eğer reklam izleniyorsa kuyruğu dondur, çık!
+    if (_isProcessingLiveQueue || _liveAudioQueue.isEmpty || _isAdPlaying) {
       return;
     }
     _isProcessingLiveQueue = true;
