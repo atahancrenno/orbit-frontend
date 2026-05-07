@@ -186,9 +186,15 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
 
   RewardedAd? _rewardedAd;
   bool _isAdLoaded = false;
-  bool _isAdPlaying = false; // 🟢 YENİ: Reklam izleniyor mu kilidi
+  bool _isAdPlaying = false; 
 
   bool _isActionInProgress = false;
+
+  // 🟢 TELSİZ BATARYASI VE KOTA DEĞİŞKENLERİ
+  bool _isPremiumUser = false;
+  int _dailyPushCount = 0;
+  int _dailyPushLimit = 5;
+  String _lastPushDate = "";
 
   void _runSafeAction(VoidCallback action) {
     if (_isActionInProgress) return; 
@@ -282,7 +288,6 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     {"name": "Radyo", "icon": Icons.speaker, "color": Colors.orangeAccent},
   ];
 
-  // 🟢 YENİ PASTEL RENKLER
   final List<Map<String, dynamic>> _bgColorsList = [
     {"name": "Cihazdan Fotoğraf Seç", "color": Colors.white, "bgValue": null, "icon": Icons.add_photo_alternate, "isGallery": true}, 
     {"name": "Varsayılan (Kaldır)", "color": Colors.transparent, "bgValue": null, "icon": Icons.layers_clear},
@@ -306,6 +311,128 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     '👎', '😤', '🤬', '❌', '🚫', '🙄', '💀',
     '😢', '😭', '💔', '🥶', '😴', '🚑'
   ];
+
+  // 🟢 TELSİZ BATARYASI KONTROL MERKEZİ (Senkron çalışır, gecikme yapmaz)
+  bool _checkBatteryLimitSync() {
+    if (_isPremiumUser) return true; // Premium ise sınırsız!
+
+    String today = DateTime.now().toIso8601String().substring(0, 10);
+    
+    // Gece yarısı geçtiyse anlık sıfırlama
+    if (_lastPushDate != today) {
+      _dailyPushCount = 0;
+      _dailyPushLimit = 5;
+      _lastPushDate = today;
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setString('last_push_date', today);
+        prefs.setInt('daily_push_count', 0);
+        prefs.setInt('daily_push_limit', 5);
+      });
+    }
+
+    if (_dailyPushCount < _dailyPushLimit) {
+      _dailyPushCount++;
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setInt('daily_push_count', _dailyPushCount);
+      });
+      return true; // Limit aşılmadı, konuşmaya izin ver
+    } else {
+      // 🛑 LİMİT DOLDU - BARİKATLAR DEVREYE GİRİYOR
+      if (_dailyPushLimit == 5) {
+        _showBatteryDialog(
+          title: "Telsiz Bataryası Bitti",
+          content: "Konuşmaya kaldığın yerden devam etmek istiyorsan, kısa bir reklam izle ve anında 30 ses gönderim hakkı kazan.",
+          newLimit: 35,
+          successMessage: "Telsiz Şarj Edildi! +30 Hak eklendi. ⚡"
+        );
+      } else if (_dailyPushLimit == 35) {
+        _showBatteryDialog(
+          title: "Batarya Kritik Seviyede",
+          content: "Günlük kullanım limitine yaklaşıyorsun. Devam etmek istersen bir reklam daha izle ve 10 ses gönderim hakkı daha kazan.",
+          newLimit: 45,
+          successMessage: "Yedek Batarya Devrede! +10 Hak eklendi. 🔋"
+        );
+      } else {
+        _showBatteryPaywallDialog();
+      }
+      return false; // Konuşmayı engelle
+    }
+  }
+
+  // 🟢 REKLAM İZLETME EKRANI
+  void _showBatteryDialog({required String title, required String content, required int newLimit, required String successMessage}) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.blueGrey.shade900,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.cyanAccent)),
+        title: Row(
+          children: [
+            const Icon(Icons.battery_alert, color: Colors.redAccent),
+            const SizedBox(width: 10),
+            Expanded(child: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+          ],
+        ),
+        content: Text(content, style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Kapat', style: TextStyle(color: Colors.white30)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent, foregroundColor: Colors.black),
+            icon: const Icon(Icons.play_arrow, size: 18),
+            label: const Text('Reklam İzle', style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _showRewardedAdGeneric(() async {
+                final p = await SharedPreferences.getInstance();
+                setState(() { _dailyPushLimit = newLimit; });
+                await p.setInt('daily_push_limit', newLimit);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(successMessage), backgroundColor: Colors.greenAccent));
+                }
+              });
+            },
+          )
+        ],
+      ),
+    );
+  }
+
+  // 🟢 KESİN SATIN ALMA EKRANI (Reklam hakkı bittiğinde)
+  void _showBatteryPaywallDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.blueGrey.shade900,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.amber)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning, color: Colors.amber),
+            SizedBox(width: 10),
+            Expanded(child: Text("Günlük Limit Doldu", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+          ],
+        ),
+        content: const Text("Tüm ücretsiz ses gönderim haklarını kullandın. Sınırsızca konuşmak, tüm ses efektlerini kullanmak ve kesintisiz iletişim için Orbit Plus'a geç.", style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Kapat', style: TextStyle(color: Colors.white30)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black),
+            icon: const Icon(Icons.stars, size: 18),
+            label: const Text('Plus\'a Geç', style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () {
+              Navigator.pop(ctx);
+              SubscriptionService.showPaywall(context);
+            },
+          )
+        ],
+      ),
+    );
+  }
 
   Future<void> _handleNudgeWithLimit(Map<String, dynamic> item) async {
     bool isPremium = await SubscriptionService.isPremium();
@@ -446,21 +573,20 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   void _showRewardedAdGeneric(VoidCallback? onReward) {
     if (_isAdLoaded && _rewardedAd != null) {
       
-      setState(() { _isAdPlaying = true; }); // 🟢 KİLİDİ KAPAT (SESLERİ BEKLET)
+      setState(() { _isAdPlaying = true; }); 
 
-      // Reklam kapandığında (ödül alınsa da alınmasa da) çalışacak tetikleyici
       _rewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
         onAdDismissedFullScreenContent: (ad) {
           ad.dispose();
-          setState(() { _isAdPlaying = false; }); // 🟢 KİLİDİ AÇ
-          _processLiveQueue(); // 🟢 BEKLEYEN SESLERİ ÇALMAYA BAŞLA!
+          setState(() { _isAdPlaying = false; }); 
+          _processLiveQueue(); 
           _isAdLoaded = false;
           _loadRewardedAd();
         },
         onAdFailedToShowFullScreenContent: (ad, error) {
           ad.dispose();
-          setState(() { _isAdPlaying = false; }); // 🟢 KİLİDİ AÇ
-          _processLiveQueue(); // 🟢 BEKLEYEN SESLERİ ÇALMAYA BAŞLA!
+          setState(() { _isAdPlaying = false; }); 
+          _processLiveQueue(); 
           _isAdLoaded = false;
           _loadRewardedAd();
         },
@@ -709,7 +835,6 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   }
 
   Future<void> _processLiveQueue() async {
-    // 🟢 YENİ: Eğer reklam izleniyorsa kuyruğu dondur, çık!
     if (_isProcessingLiveQueue || _liveAudioQueue.isEmpty || _isAdPlaying) {
       return;
     }
@@ -962,7 +1087,6 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       }
     };
 
-    // 🟢 HATA RADARI 1: KONUŞUYOR DURUMUNU SIFIRLAMA
     SocketService().onUserSpeaking = (callerId, isSpeaking) {
       if (mounted) {
         setState(() {
@@ -970,7 +1094,6 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
             _whoIsSpeaking = callerId;
             _resetLiveTimeoutForContact(callerId);
           } else {
-            // Sinyal "false" geldiğinde direk null yap ki asılı kalmasın.
             _whoIsSpeaking = null;
           }
         });
@@ -986,7 +1109,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
           _pendingCallerName = null;
           _isHandlingPendingCall = false;
           _isIncomingCallActive = false;
-          _whoIsSpeaking = null; // 🟢 BAĞLANTI BİTİŞ KİLİDİ
+          _whoIsSpeaking = null; 
         });
         _closeCallDialogSafely();
         try { NotificationService().cancelCallNotification(); } catch (_) {}
@@ -1033,7 +1156,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
               _pendingCallerName = null;
               _isHandlingPendingCall = false;
               _isIncomingCallActive = false;
-              _whoIsSpeaking = null; // 🟢 BAĞLANTI BİTİŞ KİLİDİ
+              _whoIsSpeaking = null; 
             });
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${_t('missed_call')} $displayName"), backgroundColor: Colors.orange.shade800));
           }
@@ -1094,7 +1217,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
             _isIncomingCallActive = false;
             _liveDurationTimer?.cancel();
             _liveDuration = 0;
-            _whoIsSpeaking = null; // 🟢 BAĞLANTI BİTİŞ KİLİDİ
+            _whoIsSpeaking = null; 
           }
         });
         String displayName = _localContactsMap[targetId] ?? targetId;
@@ -1114,7 +1237,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
           if (_activeLiveContacts.isEmpty) {
             isWaitingForLiveApproval = false;
             _isIncomingCallActive = false;
-            _whoIsSpeaking = null; // 🟢 BAĞLANTI BİTİŞ KİLİDİ
+            _whoIsSpeaking = null; 
           }
         });
         try { NotificationService().cancelCallNotification(); } catch (_) {}
@@ -1195,7 +1318,6 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       if (!mounted) return;
       if (_blockedContacts.contains(senderId)) return;
       
-      // 🟢 ARKA PLAN RADARI: Eğer uygulama açık değilse Push Bildirim Gönder!
       if (_appState != AppLifecycleState.resumed) {
         if (_notificationsEnabled) {
           try { 
@@ -1381,6 +1503,22 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   Future<void> _initializeData() async {
     final prefs = await SharedPreferences.getInstance();
 
+    _isPremiumUser = await SubscriptionService.isPremium();
+
+    String today = DateTime.now().toIso8601String().substring(0, 10);
+    _lastPushDate = prefs.getString('last_push_date') ?? "";
+    
+    if (_lastPushDate != today) {
+      _dailyPushCount = 0;
+      _dailyPushLimit = 5;
+      await prefs.setString('last_push_date', today);
+      await prefs.setInt('daily_push_count', 0);
+      await prefs.setInt('daily_push_limit', 5);
+    } else {
+      _dailyPushCount = prefs.getInt('daily_push_count') ?? 0;
+      _dailyPushLimit = prefs.getInt('daily_push_limit') ?? 5;
+    }
+
     String? rawPhonePref = prefs.getString('user_phone');
     if (rawPhonePref != null && rawPhonePref.isNotEmpty) {
       String normalized = rawPhonePref.replaceAll(RegExp(r'[^\d+]'), '');
@@ -1468,7 +1606,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       final token = prefs.getString('auth_token') ?? '';
 
       final response = await http.get(
-        Uri.parse('http://188.166.101.147:3005/api/users'),
+        Uri.parse('https://orbit-talk.com/api/users'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token', 
@@ -1565,7 +1703,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       return;
     }
     try {
-      final response = await http.get(Uri.parse('http://188.166.101.147:3005/api/messages/pending/$_currentUserPhone'));
+      final response = await http.get(Uri.parse('https://orbit-talk.com/api/messages/pending/$_currentUserPhone'));
       if (response.statusCode == 200) {
         List<dynamic> pendingMsgs = jsonDecode(response.body);
         if (pendingMsgs.isEmpty) {
@@ -1851,6 +1989,10 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   }
 
   void _startRecording({bool isChunkContinue = false}) {
+    if (!isChunkContinue) {
+      if (!_checkBatteryLimitSync()) return; 
+    }
+    
     if ((isRecording && !isChunkContinue) || activeIndex == -1 || allContacts[activeIndex]['isEmpty'] == true) {
       return;
     }
@@ -2001,7 +2143,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
           final prefs = await SharedPreferences.getInstance();
           final token = prefs.getString('auth_token') ?? '';
 
-          var uri = Uri.parse('http://188.166.101.147:3005/api/upload');
+          var uri = Uri.parse('https://orbit-talk.com/api/upload');
           var request = http.MultipartRequest('POST', uri);
           
           request.headers['Authorization'] = 'Bearer $token';
@@ -2126,7 +2268,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
         if (_activeLiveContacts.isEmpty) {
           _liveDurationTimer?.cancel();
           _liveDuration = 0;
-          _whoIsSpeaking = null; // 🟢 BAĞLANTI BİTİŞ KİLİDİ
+          _whoIsSpeaking = null; 
         }
       });
       if (hapticEnabled) {
@@ -2139,6 +2281,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   }
 
   void _requestLiveConnection(int index) {
+    if (!_checkBatteryLimitSync()) return;
     try {
       String name = allContacts[index]['name'] ?? _t('unknown');
       bool isGroup = allContacts[index]['isGroup'] == true;

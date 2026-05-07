@@ -367,7 +367,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
         if (idToken != null) {
           final response = await http.post(
-            Uri.parse('http://188.166.101.147:3005/api/auth/verify-otp'),
+            Uri.parse('https://orbit-talk.com/api/auth/verify-otp'),
             headers: {'Content-Type': 'application/json'},
             body: json.encode({'idToken': idToken}),
           );
