@@ -13,7 +13,7 @@ class PaywallScreen extends StatefulWidget {
 }
 
 class _PaywallScreenState extends State<PaywallScreen> {
-  AdaptyPaywall? _paywall;
+  // Kaldırıldı: AdaptyPaywall? _paywall; (Kullanılmadığı için)
   List<AdaptyPaywallProduct>? _products;
   bool _isLoading = true;
   bool _isPurchasing = false;
@@ -33,7 +33,6 @@ class _PaywallScreenState extends State<PaywallScreen> {
       final products = await Adapty().getPaywallProducts(paywall: paywall);
 
       setState(() {
-        _paywall = paywall;
         _products = products;
         _isLoading = false;
       });

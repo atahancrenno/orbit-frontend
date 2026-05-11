@@ -40,6 +40,14 @@ class OrbitMessageBubbles {
   }
 
   static Widget buildDeletedMessageView(AudioMessage msg) {
+    // 🛠️ YENİ: Mesajın tipine göre dinamik silinme metni
+    String deletedText = "Ses mesajı silindi";
+    if (msg.isNudge) {
+      deletedText = "Dürtme silindi";
+    } else if (msg.emoji != null) {
+      deletedText = "Tepki silindi";
+    }
+
     return Align(
       alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -48,12 +56,12 @@ class OrbitMessageBubbles {
         decoration: BoxDecoration(
           color: Colors.black54, border: Border.all(color: Colors.white12, width: 0.5), borderRadius: BorderRadius.circular(15),
         ),
-        child: const Row(
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.block, size: 12, color: Colors.white30),
-            SizedBox(width: 4),
-            Text("Ses mesajı silindi", style: TextStyle(color: Colors.white30, fontSize: 9, fontStyle: FontStyle.italic)),
+            const Icon(Icons.block, size: 12, color: Colors.white30),
+            const SizedBox(width: 4),
+            Text(deletedText, style: const TextStyle(color: Colors.white30, fontSize: 9, fontStyle: FontStyle.italic)),
           ],
         ),
       ),

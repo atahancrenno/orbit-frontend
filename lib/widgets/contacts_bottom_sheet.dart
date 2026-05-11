@@ -153,7 +153,7 @@ class _ContactsBottomSheetState extends State<ContactsBottomSheet> with SingleTi
         final token = prefs.getString('auth_token') ?? '';
 
         final response = await http.get(
-          Uri.parse('http://188.166.101.147:3005/api/users'),
+          Uri.parse('https://orbit-talk.com/api/users'),
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer $token',
@@ -270,7 +270,7 @@ class _ContactsBottomSheetState extends State<ContactsBottomSheet> with SingleTi
 
       // 🚀 BACKEND'E İSTEK ATIYORUZ
       final response = await http.post(
-        Uri.parse('http://188.166.101.147:3005/api/groups'),
+        Uri.parse('https://orbit-talk.com/api/groups'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',

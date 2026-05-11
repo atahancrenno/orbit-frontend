@@ -115,6 +115,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   Timer? _outgoingCallTimer;
   Timer? _incomingRingTimer;
   Timer? _vibrationTimer;
+  Timer? _ghostSpeakerTimer; 
 
   int _interactionNodeIndex = -1;
   double _interactionNodeOffset = 0.0;
@@ -190,11 +191,40 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
 
   bool _isActionInProgress = false;
 
-  // 🟢 TELSİZ BATARYASI VE KOTA DEĞİŞKENLERİ
   bool _isPremiumUser = false;
   int _dailyPushCount = 0;
   int _dailyPushLimit = 5;
   String _lastPushDate = "";
+
+  // 🛠️ YENİ: Emoji veya Nudge'ları Veritabanına (Geçmişe) Eklemek İçin Merkezi Fonksiyon
+  void _logInteraction({required String contactIdentifier, required bool isMe, String? senderName, String? emoji, bool isNudge = false}) {
+    final now = DateTime.now();
+    String timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
+    final newMsg = AudioMessage(
+      id: DateTime.now().millisecondsSinceEpoch.toString() + math.Random().nextInt(1000).toString(),
+      contactName: contactIdentifier,
+      senderName: senderName ?? (isMe ? _userName : _localContactsMap[contactIdentifier] ?? contactIdentifier),
+      isMe: isMe,
+      durationInSeconds: 0,
+      time: timeStr,
+      isRead: true, // Reaksiyonlar direkt okundu sayılır
+      isLiveMessage: false,
+      emoji: emoji,
+      isNudge: isNudge,
+    );
+    
+    if (mounted) {
+      setState(() {
+        _allMessages.insert(0, newMsg);
+        _sortOrbitContactsByRecent();
+        
+        // Ses mesajlarında olduğu gibi bunların da zamanla silinmesini başlat
+        if (selfDestructSeconds > 0) {
+            _startDeletionCountdown(newMsg);
+        }
+      });
+    }
+  }
 
   void _runSafeAction(VoidCallback action) {
     if (_isActionInProgress) return; 
@@ -312,13 +342,11 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     '😢', '😭', '💔', '🥶', '😴', '🚑'
   ];
 
-  // 🟢 TELSİZ BATARYASI KONTROL MERKEZİ (Senkron çalışır, gecikme yapmaz)
   bool _checkBatteryLimitSync() {
-    if (_isPremiumUser) return true; // Premium ise sınırsız!
+    if (_isPremiumUser) return true; 
 
     String today = DateTime.now().toIso8601String().substring(0, 10);
     
-    // Gece yarısı geçtiyse anlık sıfırlama
     if (_lastPushDate != today) {
       _dailyPushCount = 0;
       _dailyPushLimit = 5;
@@ -335,9 +363,8 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       SharedPreferences.getInstance().then((prefs) {
         prefs.setInt('daily_push_count', _dailyPushCount);
       });
-      return true; // Limit aşılmadı, konuşmaya izin ver
+      return true; 
     } else {
-      // 🛑 LİMİT DOLDU - BARİKATLAR DEVREYE GİRİYOR
       if (_dailyPushLimit == 5) {
         _showBatteryDialog(
           title: "Telsiz Bataryası Bitti",
@@ -355,11 +382,10 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       } else {
         _showBatteryPaywallDialog();
       }
-      return false; // Konuşmayı engelle
+      return false; 
     }
   }
 
-  // 🟢 REKLAM İZLETME EKRANI
   void _showBatteryDialog({required String title, required String content, required int newLimit, required String successMessage}) {
     showDialog(
       context: context,
@@ -400,7 +426,6 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     );
   }
 
-  // 🟢 KESİN SATIN ALMA EKRANI (Reklam hakkı bittiğinde)
   void _showBatteryPaywallDialog() {
     showDialog(
       context: context,
@@ -441,6 +466,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     if (isPremium) {
       String phone = item['phone'];
       SocketService().sendNudge(phone, _currentUserPhone!, _userName);
+      _logInteraction(contactIdentifier: item['name'], isMe: true, isNudge: true); // 🟢 LOG
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${item['name']} dürtüldü! ⚡")));
     } else {
@@ -448,6 +474,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       if (nudgesLeft > 0) {
         String phone = item['phone'];
         SocketService().sendNudge(phone, _currentUserPhone!, _userName);
+        _logInteraction(contactIdentifier: item['name'], isMe: true, isNudge: true); // 🟢 LOG
         await prefs.setInt('nudge_limit', nudgesLeft - 1);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${item['name']} dürtüldü! (Kalan hak: ${nudgesLeft - 1})")));
@@ -474,6 +501,7 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     }
 
     Future<void> executeNudge() async {
+      String contactIdentifier = item['isGroup'] == true ? item['name'] : item['phone'];
       if (item['isGroup'] == true) {
         List<dynamic> members = item['members'] ?? [];
         for (var m in members) {
@@ -482,6 +510,9 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       } else {
         sendToTarget(item['phone']);
       }
+      
+      _logInteraction(contactIdentifier: contactIdentifier, isMe: true, isNudge: true); // 🟢 LOG
+      
       if (hapticEnabled) { 
         try { 
           HapticFeedback.heavyImpact(); 
@@ -584,16 +615,20 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
           _loadRewardedAd();
         },
         onAdFailedToShowFullScreenContent: (ad, error) {
+          debugPrint('🛑 Reklam gösterilirken kilitlendi: $error');
           ad.dispose();
           setState(() { _isAdPlaying = false; }); 
           _processLiveQueue(); 
           _isAdLoaded = false;
           _loadRewardedAd();
+          if (onReward != null) onReward();
         },
       );
 
-      _rewardedAd!.show(onUserEarnedReward: (AdWithoutView ad, RewardItem reward) {
-        if (onReward != null) onReward();
+      Future.delayed(const Duration(milliseconds: 300), () {
+        _rewardedAd!.show(onUserEarnedReward: (AdWithoutView ad, RewardItem reward) {
+          if (onReward != null) onReward();
+        });
       });
     } else {
       if (onReward != null) onReward();
@@ -658,15 +693,18 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
 
     if (activeIndex != -1) {
       bool isGroupNode = allContacts[activeIndex]['isGroup'] == true;
+      String contactIdentifier = isGroupNode ? allContacts[activeIndex]['name'] : allContacts[activeIndex]['phone'];
+      
       if (isGroupNode) {
         List<dynamic> members = allContacts[activeIndex]['members'] ?? [];
         for (var m in members) {
           SocketService().sendReaction(m.toString(), _currentUserPhone!, emoji);
         }
       } else {
-        String targetPhone = allContacts[activeIndex]['phone'];
-        SocketService().sendReaction(targetPhone, _currentUserPhone!, emoji);
+        SocketService().sendReaction(contactIdentifier, _currentUserPhone!, emoji);
       }
+      
+      _logInteraction(contactIdentifier: contactIdentifier, isMe: true, emoji: emoji); // 🟢 LOG
     }
 
     setState(() {
@@ -926,9 +964,28 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     );
   }
 
+  // 🛠️ YENİ: FİZİKSEL SES KISMA TUŞU (DONANIMSAL PTT) ENTEGRASYONU
+  bool _handleKeyEvent(KeyEvent event) {
+    if (event.logicalKey == LogicalKeyboardKey.audioVolumeDown || event.logicalKey == LogicalKeyboardKey.audioVolumeUp) {
+      if (event is KeyDownEvent) {
+        if (!isRecording && !_isIncomingCallActive && activeIndex != -1 && allContacts[activeIndex]['isEmpty'] != true) {
+          _startRecording();
+        }
+      } else if (event is KeyUpEvent) {
+        if (isRecording) {
+          _stopRecording();
+        }
+      }
+      return true; 
+    }
+    return false;
+  }
+
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_handleKeyEvent); // 🟢 Donanım tuşu dinleyicisi
+    
     _loadRewardedAd();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     WidgetsBinding.instance.addObserver(this);
@@ -993,6 +1050,19 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
 
     AudioSession.instance.then((session) async {
       await session.configure(const AudioSessionConfiguration.speech());
+      
+      session.interruptionEventStream.listen((event) {
+        if (event.begin) {
+          debugPrint("📞 DİKKAT: NATIVE TELEFON ARAMASI GELDİ!");
+          if (isRecording) { _stopRecording(); }
+          if (mounted) {
+            setState(() {
+              _whoIsSpeaking = null;
+              _isCurrentlyPlayingOrRecording = false;
+            });
+          }
+        }
+      });
     }).catchError((e) {
       debugPrint("AudioSession yapılandırma hatası: $e");
     });
@@ -1038,20 +1108,39 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
 
   void _resetLiveTimeoutForContact(String contactPhone) {
     _liveTimers[contactPhone]?.cancel();
-    _liveTimers[contactPhone] = Timer(const Duration(seconds: 30), () {
+    _liveTimers[contactPhone] = Timer(const Duration(seconds: 60), () {
       if (mounted) {
         if (isRecording || _whoIsSpeaking == contactPhone || _isCurrentlyPlayingOrRecording || _liveAudioQueue.isNotEmpty) {
           _resetLiveTimeoutForContact(contactPhone);
           return;
         }
+        
+        _incomingAmplitudeTimer?.cancel();
+        _incomingAudioLevel.value = 0.0;
+        
         setState(() {
           _activeLiveContacts.remove(contactPhone);
           _liveTimers.remove(contactPhone);
           if (_activeLiveContacts.isEmpty) {
             _liveDurationTimer?.cancel();
             _liveDuration = 0;
+            _whoIsSpeaking = null;
+            _isCurrentlyPlayingOrRecording = false; 
           }
         });
+        
+        String name = _localContactsMap[contactPhone] ?? contactPhone;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.signal_wifi_bad, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Text("$name ile iletişim koptu."),
+            ],
+          ),
+          backgroundColor: Colors.orange.shade900,
+          duration: const Duration(seconds: 3),
+        ));
       }
     });
   }
@@ -1093,8 +1182,16 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
           if (isSpeaking) {
             _whoIsSpeaking = callerId;
             _resetLiveTimeoutForContact(callerId);
+            
+            _ghostSpeakerTimer?.cancel();
+            _ghostSpeakerTimer = Timer(const Duration(seconds: 45), () {
+               if (mounted && _whoIsSpeaking == callerId) {
+                  setState(() => _whoIsSpeaking = null);
+               }
+            });
           } else {
             _whoIsSpeaking = null;
+            _ghostSpeakerTimer?.cancel();
           }
         });
       }
@@ -1128,7 +1225,13 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
         if (_isCallDialogOpen || _isHandlingPendingCall) {
           return;
         }
-        int idx = allContacts.indexWhere((c) => c['phone'] == callerId);
+        int idx = allContacts.indexWhere((c) {
+          if (c['isEmpty'] == true) return false;
+          String existingPhone = (c['phone'] ?? '').toString().replaceAll('+90', '').replaceAll(RegExp(r'[^\d]'), '');
+          String incomingPhone = callerId.replaceAll('+90', '').replaceAll(RegExp(r'[^\d]'), '');
+          return existingPhone == incomingPhone;
+        });
+
         if (idx == -1) {
           setState(() {
             String displayName = _localContactsMap[callerId] ?? callerId;
@@ -1265,7 +1368,13 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
           messageContactName = allContacts[activeIndex]['name'];
         }
       } else {
-        int idx = allContacts.indexWhere((c) => c['phone'] == senderId);
+        int idx = allContacts.indexWhere((c) {
+          if (c['isEmpty'] == true) return false;
+          String existingPhone = (c['phone'] ?? '').toString().replaceAll('+90', '').replaceAll(RegExp(r'[^\d]'), '');
+          String incomingPhone = senderId.replaceAll('+90', '').replaceAll(RegExp(r'[^\d]'), '');
+          return existingPhone == incomingPhone;
+        });
+
         if (idx == -1) {
           int emptyIdx = allContacts.lastIndexWhere((c) => c['isEmpty'] == true);
           if (emptyIdx != -1) {
@@ -1318,6 +1427,11 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       if (!mounted) return;
       if (_blockedContacts.contains(senderId)) return;
       
+      bool isGroup = activeIndex != -1 && allContacts[activeIndex]['isGroup'] == true;
+      String messageContactName = isGroup ? allContacts[activeIndex]['name'] : senderId; 
+      
+      _logInteraction(contactIdentifier: messageContactName, isMe: false, senderName: senderName, isNudge: true); // 🟢 LOG
+      
       if (_appState != AppLifecycleState.resumed) {
         if (_notificationsEnabled) {
           try { 
@@ -1368,7 +1482,9 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
       }
 
       bool isGroup = activeIndex != -1 && allContacts[activeIndex]['isGroup'] == true;
+      String messageContactName = isGroup ? allContacts[activeIndex]['name'] : senderId;
 
+      _logInteraction(contactIdentifier: messageContactName, isMe: false, senderName: sName, emoji: "👍"); // 🟢 LOG
       _triggerReaction("👍", senderName: isGroup ? sName : null);
 
       if (hapticEnabled) {
@@ -1392,7 +1508,9 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
 
       String senderName = _localContactsMap[senderId] ?? senderId;
       bool isGroup = activeIndex != -1 && allContacts[activeIndex]['isGroup'] == true;
+      String messageContactName = isGroup ? allContacts[activeIndex]['name'] : senderId;
 
+      _logInteraction(contactIdentifier: messageContactName, isMe: false, senderName: senderName, emoji: emoji); // 🟢 LOG
       _triggerReaction(emoji, senderName: isGroup ? senderName : null);
 
       if (hapticEnabled) { try { HapticFeedback.lightImpact(); } catch (_) {} }
@@ -1556,6 +1674,19 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
     if (_currentUserPhone != null && _currentUserPhone!.isNotEmpty && savedToken != null) {
       await _socketService.initConnection(_currentUserPhone!, savedToken);
       _isSocketStarted = true;
+
+      try {
+        String? fcmToken = await FirebaseMessaging.instance.getToken();
+        if (fcmToken != null) {
+          debugPrint("📲 BİLDİRİM ADRESİ ALINDI: $fcmToken");
+          _socketService.socket.emit('register', {
+            'userId': _currentUserPhone,
+            'fcmToken': fcmToken
+          });
+        }
+      } catch (e) {
+        debugPrint("🚨 FCM Token Alınamadı: $e");
+      }
 
       _socketService.onUserStatusChanged = (userId, status) {
         if (!mounted) return;
@@ -1840,10 +1971,12 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKeyEvent); // 🟢 Temizlik
     _pulseController.dispose();
     _breatheController.dispose();
     _entranceController.dispose();
     _vibrationTimer?.cancel();
+    _ghostSpeakerTimer?.cancel();
     _historyPlayer.dispose();
     _audioRecorder.dispose();
     _searchController.dispose();
@@ -1866,6 +1999,18 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     _appState = state;
+
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      if (isRecording) {
+        _stopRecording();
+      }
+      if (mounted) {
+        setState(() {
+          _whoIsSpeaking = null; 
+        });
+      }
+    }
+
     if (state == AppLifecycleState.resumed) {
       try {
         if (_isSocketStarted && SocketService().socket.disconnected) {
@@ -2239,6 +2384,9 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   }
 
   void _endLiveConnection() {
+    _incomingAmplitudeTimer?.cancel();
+    _incomingAudioLevel.value = 0.0;
+
     if (activeIndex != -1) {
       bool isGroup = allContacts[activeIndex]['isGroup'] == true;
       String contactName = allContacts[activeIndex]['name'];
@@ -2453,6 +2601,34 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
 
     final Map<String, dynamic>? selectedContact = await ContactsBottomSheet.show(context, initialIndex: 0);
     if (selectedContact != null && mounted) {
+      
+      // 🛠️ YENİ ZIRH: ÇİFT KAYIT (KOPYA KİŞİ) KONTROLÜ
+      if (selectedContact['isGroup'] != true) {
+        String newPhone = (selectedContact['phone'] ?? '').toString().replaceAll(RegExp(r'[^\d]'), '');
+        
+        bool isDuplicate = allContacts.any((c) {
+          if (c['isEmpty'] == true || c['isGroup'] == true) return false;
+          String existingPhone = (c['phone'] ?? '').toString().replaceAll(RegExp(r'[^\d]'), '');
+          return existingPhone == newPhone;
+        });
+
+        if (isDuplicate) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.white),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text("${selectedContact['name']} zaten yörüngende ekli!")),
+                ],
+              ),
+              backgroundColor: Colors.orange.shade900,
+            )
+          );
+          return; // Aynı kişiyse eklemeyi iptal et ve çık!
+        }
+      }
+
       setState(() {
         if (allContacts[initialIndex]['isEmpty'] == true) {
           allContacts[initialIndex] = selectedContact;
@@ -2558,9 +2734,10 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   }
 
   Future<void> _handleEffectSelection(String effectName) async {
-    if (effectName == 'Normal') {
-      setState(() { _selectedVoiceEffect = effectName; });
-      return;
+    if (effectName.trim().toLowerCase() == 'normal') {
+      setState(() { _selectedVoiceEffect = 'Normal'; });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Normal sese dönüldü.")));
+      return; 
     }
 
     final prefs = await SharedPreferences.getInstance();
@@ -2744,6 +2921,10 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
   @override
   Widget build(BuildContext context) {
     TextDirection layoutDirection = _currentLang == 'ar' ? TextDirection.rtl : TextDirection.ltr;
+    
+    // 🛠️ AKTİF EFEKT VERİSİNİ BUL
+    Map<String, dynamic> currentEffect = _voiceEffects.firstWhere((fx) => fx['name'] == _selectedVoiceEffect, orElse: () => _voiceEffects[0]);
+    bool hasActiveEffect = _selectedVoiceEffect != 'Normal';
 
     return Directionality(
         textDirection: layoutDirection,
@@ -3197,6 +3378,40 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                               );
                             }).reversed,
 
+                            // 🛠️ YENİ AKTİF EFEKT İKONU (ANA MENÜ BUTONUNUN ÜSTÜNDE)
+                            if (hasActiveEffect && !showSearchField && activeIndex != -1 && allContacts[activeIndex]['isEmpty'] != true)
+                              AnimatedPositioned(
+                                duration: const Duration(milliseconds: 300),
+                                curve: Curves.easeOutCubic,
+                                right: !_isLeftHanded ? 12.0 : null,
+                                left: _isLeftHanded ? 12.0 : null,
+                                top: menuY - 195, 
+                                child: AnimatedOpacity(
+                                  duration: const Duration(milliseconds: 300),
+                                  opacity: anyMenuExpanded ? 0.0 : 1.0, // Menü açıkken gizle
+                                  child: IgnorePointer(
+                                    ignoring: anyMenuExpanded,
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        setState(() { _selectedVoiceEffect = 'Normal'; });
+                                        if (hapticEnabled) { try { HapticFeedback.lightImpact(); } catch (_) {} }
+                                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Ses efekti kapatıldı (Normal).")));
+                                      },
+                                      child: Container(
+                                        width: 46, height: 46,
+                                        decoration: BoxDecoration(
+                                          color: currentEffect['color'].withValues(alpha: 0.2),
+                                          shape: BoxShape.circle,
+                                          border: Border.all(color: currentEffect['color'], width: 1.5),
+                                          boxShadow: [BoxShadow(color: currentEffect['color'].withValues(alpha: 0.3), blurRadius: 10)]
+                                        ),
+                                        child: Icon(currentEffect['icon'], color: currentEffect['color'], size: 22),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+
                             AnimatedPositioned(
                               duration: const Duration(milliseconds: 300),
                               curve: Curves.easeOutCubic,
@@ -3366,6 +3581,9 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                                                       setState(() => _isActiveMenuExpanded = false);
                                                       _triggerReaction("👍");
                                                       if (hapticEnabled) { try { HapticFeedback.selectionClick(); } catch (_) { /* ignore */ } }
+                                                      
+                                                      String contactIdentifier = allContacts[activeIndex]['name'] ?? allContacts[activeIndex]['phone'];
+                                                      
                                                       if (isGroup) {
                                                         List<dynamic> members = allContacts[activeIndex]['members'] ?? [];
                                                         for (var m in members) {
@@ -3374,6 +3592,8 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                                                       } else {
                                                         SocketService().sendRogerThat(allContacts[activeIndex]['phone'], _currentUserPhone!, _userName);
                                                       }
+                                                      
+                                                      _logInteraction(contactIdentifier: contactIdentifier, isMe: true, emoji: "👍"); // 🟢 LOG
                                                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('roger_sent'))));
                                                     })),
 
@@ -3546,10 +3766,15 @@ class _OrbitMainScreenState extends State<OrbitMainScreen> with TickerProviderSt
                                               child: GestureDetector(
                                                 onTap: () => _runSafeAction(() {
                                                   if (hapticEnabled) { try { HapticFeedback.heavyImpact(); } catch (_) { /* ignore */ } }
+                                                  
+                                                  String contactIdentifier = allContacts[activeIndex]['name'] ?? allContacts[activeIndex]['phone'];
+                                                  
                                                   List<dynamic> members = allContacts[activeIndex]['members'] ?? [];
                                                   for(var m in members) {
                                                     SocketService().sendNudge(m.toString(), _currentUserPhone!, _userName);
                                                   }
+                                                  
+                                                  _logInteraction(contactIdentifier: contactIdentifier, isMe: true, isNudge: true); // 🟢 LOG
                                                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('all_nudged'))));
                                                   setState(() => _activeSubOrbit = SubOrbitType.none);
                                                 }),

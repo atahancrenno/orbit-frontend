@@ -1,4 +1,4 @@
-enum UserStatus { available, busy, away }
+enum UserStatus { available, busy, away, offline }
 
 class AudioMessage {
   final String id;
@@ -27,8 +27,11 @@ class AudioMessage {
   String? repliedToMessageId; 
   final String? audioFilePath;
   
-  // 🟢 YENİ: Ses Efekti (Normal, Askeri, Megafon, Ajan)
   final String voiceEffect; 
+  
+  // 🟢 YENİ: Emoji ve Dürtme Loglama Değişkenleri
+  final String? emoji; 
+  final bool isNudge;
 
   AudioMessage({
     required this.id,
@@ -53,7 +56,9 @@ class AudioMessage {
     this.playbackSpeed = 1.0,
     this.repliedToMessageId,
     this.audioFilePath,
-    this.voiceEffect = "Normal", // 🟢 Varsayılan efekt Normal
+    this.voiceEffect = "Normal", 
+    this.emoji,
+    this.isNudge = false,
     DateTime? createdAt,
   }) : 
        listenedBy = listenedBy ?? {}, 

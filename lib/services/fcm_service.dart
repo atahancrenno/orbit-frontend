@@ -71,7 +71,7 @@ class FCMService {
 
       // Backend'deki FCM Güncelleme Rotası (Rotayı kendi API yapına göre adlandırdım)
       final response = await http.put(
-        Uri.parse('http://188.166.101.147:3005/api/users/update-fcm-token'),
+        Uri.parse('https://orbit-talk.com/api/users/update-fcm-token'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $jwtToken',

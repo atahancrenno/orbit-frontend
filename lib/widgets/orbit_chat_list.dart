@@ -268,54 +268,89 @@ class _OrbitChatListState extends State<OrbitChatList> with SingleTickerProvider
 
         Row(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             if (!msg.isMe) _buildTimeAndTicks(msg), 
             
-            GestureDetector(
-              onTap: () {
-                if (msg.isLiveMessage) {
-                  setState(() => _expandedMessageId = isExpanded ? null : msg.id);
-                  if (widget.hapticEnabled) HapticFeedback.selectionClick();
-                } else {
-                  if (!msg.isPlaying) {
-                    setState(() => _expandedMessageId = msg.id);
-                  }
-                  widget.onPlayMessage(msg);
-                  if (widget.hapticEnabled) HapticFeedback.lightImpact();
-                }
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width: msg.isLiveMessage ? null : (widget.isCircularMessageStyle ? 45 : 85),
-                height: 40,
-                margin: const EdgeInsets.symmetric(horizontal: 6),
-                padding: msg.isLiveMessage ? const EdgeInsets.symmetric(horizontal: 14) : null,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.7),
-                  borderRadius: BorderRadius.circular(widget.isCircularMessageStyle ? 25 : 20),
-                  border: Border.all(color: baseColor.withValues(alpha: 0.6), width: 1.5),
-                  boxShadow: msg.isPlaying ? [BoxShadow(color: baseColor.withValues(alpha: 0.3), blurRadius: 8, spreadRadius: 1)] : [],
+            if (msg.emoji != null || msg.isNudge) ...[
+                GestureDetector(
+                    onTap: () {
+                        setState(() => _expandedMessageId = isExpanded ? null : msg.id);
+                        if (widget.hapticEnabled) HapticFeedback.selectionClick();
+                    },
+                    child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.4),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: msg.isNudge ? Colors.amber.withValues(alpha: 0.5) : baseColor.withValues(alpha: 0.3)),
+                        ),
+                        child: Column(
+                            children: [
+                                if (msg.isNudge) 
+                                    const Icon(Icons.touch_app, color: Colors.amber, size: 32)
+                                else if (msg.emoji != null)
+                                    Text(msg.emoji!, style: const TextStyle(fontSize: 32)),
+                                    
+                                const SizedBox(height: 4),
+                                Text(
+                                    msg.isNudge 
+                                      ? (msg.isMe ? "Dürtme uyarısı gönderildi" : "Seni dürttü!") 
+                                      : (msg.emoji == "👍" ? "Anlaşıldı" : "Tepki"),
+                                    style: TextStyle(color: msg.isNudge ? Colors.amber : Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)
+                                )
+                            ],
+                        ),
+                    ),
+                )
+            ] else ...[
+                GestureDetector(
+                  onTap: () {
+                    if (msg.isLiveMessage) {
+                      setState(() => _expandedMessageId = isExpanded ? null : msg.id);
+                      if (widget.hapticEnabled) HapticFeedback.selectionClick();
+                    } else {
+                      if (!msg.isPlaying) {
+                        setState(() => _expandedMessageId = msg.id);
+                      }
+                      widget.onPlayMessage(msg);
+                      if (widget.hapticEnabled) HapticFeedback.lightImpact();
+                    }
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: msg.isLiveMessage ? null : (widget.isCircularMessageStyle ? 45 : 85),
+                    height: 40,
+                    margin: const EdgeInsets.symmetric(horizontal: 6),
+                    padding: msg.isLiveMessage ? const EdgeInsets.symmetric(horizontal: 14) : null,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(widget.isCircularMessageStyle ? 25 : 20),
+                      border: Border.all(color: baseColor.withValues(alpha: 0.6), width: 1.5),
+                      boxShadow: msg.isPlaying ? [BoxShadow(color: baseColor.withValues(alpha: 0.3), blurRadius: 8, spreadRadius: 1)] : [],
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min, 
+                      children: [
+                        if (msg.isLiveMessage) ...[
+                          Icon(msg.isMe ? Icons.podcasts : Icons.sensors, size: 16, color: baseColor),
+                          const SizedBox(width: 6),
+                          Text(msg.isMe ? "Canlı Yayın" : "Canlı Dinlendi", style: TextStyle(color: baseColor.withValues(alpha: 0.8), fontSize: 10, fontWeight: FontWeight.bold)),
+                        ] else ...[
+                          Icon(msg.isPlaying ? Icons.pause : Icons.play_arrow, size: 20, color: playIconColor),
+                        ],
+                        
+                        if (!widget.isCircularMessageStyle && !msg.isLiveMessage) ...[
+                          const SizedBox(width: 6),
+                          Text(widget.formatDuration(msg.durationInSeconds), style: TextStyle(color: baseColor, fontSize: 12, fontWeight: FontWeight.bold)),
+                        ]
+                      ],
+                    ),
+                  ),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min, 
-                  children: [
-                    if (msg.isLiveMessage) ...[
-                      Icon(msg.isMe ? Icons.podcasts : Icons.sensors, size: 16, color: baseColor),
-                      const SizedBox(width: 6),
-                      Text(msg.isMe ? "Canlı Yayın" : "Canlı Dinlendi", style: TextStyle(color: baseColor.withValues(alpha: 0.8), fontSize: 10, fontWeight: FontWeight.bold)),
-                    ] else ...[
-                      Icon(msg.isPlaying ? Icons.pause : Icons.play_arrow, size: 20, color: playIconColor),
-                    ],
-                    
-                    if (!widget.isCircularMessageStyle && !msg.isLiveMessage) ...[
-                      const SizedBox(width: 6),
-                      Text(widget.formatDuration(msg.durationInSeconds), style: TextStyle(color: baseColor, fontSize: 12, fontWeight: FontWeight.bold)),
-                    ]
-                  ],
-                ),
-              ),
-            ),
+            ],
             
             if (msg.isMe) _buildTimeAndTicks(msg), 
           ],
@@ -385,7 +420,7 @@ class _OrbitChatListState extends State<OrbitChatList> with SingleTickerProvider
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (!msg.isLiveMessage) ...[
+          if (!msg.isLiveMessage && msg.emoji == null && !msg.isNudge) ...[
             Row(
               children: [
                 Expanded(
@@ -427,7 +462,7 @@ class _OrbitChatListState extends State<OrbitChatList> with SingleTickerProvider
                 ),
               ],
             ),
-          ] else ...[
+          ] else if (msg.isLiveMessage) ...[
             Row(
               children: [
                 const Icon(Icons.info_outline, color: Colors.white38, size: 16),
@@ -460,8 +495,7 @@ class _OrbitChatListState extends State<OrbitChatList> with SingleTickerProvider
                 child: Icon(msg.isSaved ? Icons.bookmark : Icons.bookmark_border, size: 18, color: msg.isSaved ? Colors.orangeAccent : Colors.white54),
               ),
               
-              // 🟢 YENİ: Sadece 👍 ve ❤️ bırakıldı
-              if (!msg.isMe && !msg.isLiveMessage) ...[
+              if (!msg.isMe && !msg.isLiveMessage && msg.emoji == null && !msg.isNudge) ...[
                 const SizedBox(width: 16),
                 _buildReactionButton(msg, "👍"),
                 const SizedBox(width: 8),
