@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/audio_message.dart';
 import '../utils/painters.dart';
 import 'orbit_message_bubbles.dart';
@@ -42,6 +43,9 @@ class _OrbitChatListState extends State<OrbitChatList> with SingleTickerProvider
   final Set<String> _selectedMessageIds = {};
   
   String? _expandedMessageId; 
+  
+  // 🟢 YENİ: Boş ekran ipucunu bir kere gösterip kapatmak için değişken
+  bool _hasSeenEmptyStateHint = false;
 
   @override
   void initState() {
@@ -50,12 +54,31 @@ class _OrbitChatListState extends State<OrbitChatList> with SingleTickerProvider
       vsync: this, 
       duration: const Duration(milliseconds: 800)
     )..repeat(reverse: true);
+    
+    _checkEmptyStateHint(); // 🟢 YENİ
   }
 
   @override
   void dispose() {
     _dangerPulseController.dispose();
     super.dispose();
+  }
+
+  // 🟢 YENİ: Kullanıcı bu ipucunu daha önce görmüş mü kontrol et
+  Future<void> _checkEmptyStateHint() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _hasSeenEmptyStateHint = prefs.getBool('has_seen_empty_hint') ?? false;
+    });
+  }
+
+  // 🟢 YENİ: Kullanıcı ipucuna tıklayınca bir daha gösterme
+  Future<void> _dismissEmptyStateHint() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('has_seen_empty_hint', true);
+    setState(() {
+      _hasSeenEmptyStateHint = true;
+    });
   }
 
   void _toggleSelection(AudioMessage msg) {
@@ -132,6 +155,47 @@ class _OrbitChatListState extends State<OrbitChatList> with SingleTickerProvider
 
   @override
   Widget build(BuildContext context) {
+    // 🟢 YENİ: Liste boşsa ve kullanıcı henüz ipucunu kapatmadıysa göster
+    if (widget.activeMessages.isEmpty && !_hasSeenEmptyStateHint) {
+      return Center(
+        child: GestureDetector(
+          onTap: _dismissEmptyStateHint,
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 40),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.4),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.touch_app, color: Colors.cyanAccent, size: 48),
+                const SizedBox(height: 16),
+                const Text(
+                  "Henüz mesaj yok.",
+                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "Konuşmak için radara basılı tut veya dikkatini çekmek için kişiye çift tıkla! ⚡",
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13, height: 1.4),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  "(Kapatmak için dokun)",
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 10),
+                )
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Column(
       children: [
         AnimatedContainer(
