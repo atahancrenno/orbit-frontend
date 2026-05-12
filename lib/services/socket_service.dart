@@ -36,7 +36,8 @@ class SocketService {
     if (_isInitialized && socket.connected) return;
 
     myUserId = myPhone;
-    String serverUrl = 'https://orbit-talk.com:443';
+    // ✅ YENİ KARARGAH FREKANSI
+    String serverUrl = 'https://orbit-talk.com';
     
     debugPrint('📡 Telsiz frekansı ayarlanıyor: $serverUrl');
 
@@ -114,8 +115,9 @@ class SocketService {
         String audioUrl = data['audioUrl']; 
         String msgId = data['messageId'] ?? DateTime.now().millisecondsSinceEpoch.toString();
         
-        if (audioUrl.startsWith('http://188.166.101.147')) {
-          audioUrl = audioUrl.replaceFirst('http://188.166.101.147:3005', 'https://orbit-talk.com');
+        // ✅ ESKİ IP ADRESİNİ YENİ DOMAIN İLE DEĞİŞTİRİYORUZ
+        if (audioUrl.contains('188.166.101.147') || audioUrl.contains('142.93.131.187')) {
+          audioUrl = audioUrl.replaceAll(RegExp(r'http://.*?:3005'), 'https://orbit-talk.com');
         }
 
         Directory docDir = await getApplicationDocumentsDirectory();
